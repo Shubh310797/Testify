@@ -1,0 +1,633 @@
+/* ═══════════════════════════════════════════════════════════════
+   TestiFy — Activity History Page CSS
+   Uses same design tokens as ad_dash.css
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Local vars (derived from ad_dash.css tokens) ── */
+:root {
+  --activity:       #6c5ce7;
+  --activity-light: #e8e0ff;
+  --ah-radius:      14px;
+  --ah-shadow:      0 4px 20px rgba(74,144,217,.07);
+}
+
+/* ── Toast ── */
+.ah-toast {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  color: #fff;
+  padding: 12px 22px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  transition: opacity .6s;
+  box-shadow: 0 4px 14px rgba(39,174,96,.3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Filter Bar ── */
+.ah-filter-bar {
+  background: var(--white);
+  border-radius: var(--ah-radius);
+  border: 1.5px solid var(--border);
+  padding: 18px 22px;
+  box-shadow: var(--ah-shadow);
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.ah-filter-bar::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #3a7bd5, #6c5ce7, #a29bfe);
+  border-radius: var(--ah-radius) var(--ah-radius) 0 0;
+}
+
+.ah-filter-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ah-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ah-filter-group label {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.ah-filter-group label svg {
+  opacity: .6;
+}
+
+.ah-input {
+  height: 40px;
+  padding: 0 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  background: var(--white);
+  transition: border-color .2s, box-shadow .2s;
+}
+.ah-input:focus {
+  outline: none;
+  border-color: #6c5ce7;
+  box-shadow: 0 0 0 3px rgba(108,92,231,.12);
+}
+
+.ah-select {
+  min-width: 140px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7fa3' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+input[type="date"].ah-input {
+  min-width: 170px;
+}
+input[type="date"].ah-input::-webkit-calendar-picker-indicator {
+  opacity: .5;
+  cursor: pointer;
+}
+
+/* ── Buttons ── */
+.ah-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 10px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .2s;
+  text-decoration: none;
+  white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+}
+.ah-btn:active {
+  transform: scale(.97);
+}
+
+.ah-btn-primary {
+  background: linear-gradient(135deg, #3a7bd5, #4facfe);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(58,123,213,.25);
+}
+.ah-btn-primary:hover {
+  box-shadow: 0 6px 20px rgba(58,123,213,.35);
+  transform: translateY(-1px);
+}
+
+.ah-btn-download {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(39,174,96,.25);
+}
+.ah-btn-download:hover {
+  box-shadow: 0 6px 20px rgba(39,174,96,.35);
+  transform: translateY(-1px);
+}
+
+.ah-btn-snapshot {
+  background: linear-gradient(135deg, #6c5ce7, #a29bfe);
+  color: #fff;
+  margin-left: auto;
+  box-shadow: 0 2px 10px rgba(108,92,231,.25);
+}
+.ah-btn-snapshot:hover {
+  box-shadow: 0 6px 20px rgba(108,92,231,.35);
+  transform: translateY(-1px);
+}
+
+/* ── Summary Cards Grid ── */
+.ah-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.ah-sum-card {
+  background: var(--white);
+  border-radius: var(--ah-radius);
+  border: 1.5px solid var(--border);
+  padding: 18px 14px 14px;
+  text-align: center;
+  box-shadow: var(--ah-shadow);
+  position: relative;
+  overflow: hidden;
+  transition: box-shadow .2s, transform .2s, border-color .2s;
+}
+.ah-sum-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 28px rgba(74,144,217,.14);
+}
+
+.ah-sum-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 8px;
+}
+.ah-sum-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ah-sum-value {
+  font-family: 'Poppins', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 4px;
+  letter-spacing: -.5px;
+}
+
+.ah-sum-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+/* ── Summary card color variants ── */
+.ah-sum-blue {
+  border-top: 4px solid #3a7bd5;
+}
+.ah-sum-blue::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #3a7bd5, #4facfe);
+  border-radius: var(--ah-radius) var(--ah-radius) 0 0;
+}
+.ah-sum-blue .ah-sum-icon {
+  background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+}
+.ah-sum-blue .ah-sum-icon svg { color: #3a7bd5; }
+.ah-sum-blue .ah-sum-value { color: #3a7bd5; }
+
+.ah-sum-purple {
+  border-top: 4px solid #8e44ad;
+}
+.ah-sum-purple::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #8e44ad, #9b59b6);
+  border-radius: var(--ah-radius) var(--ah-radius) 0 0;
+}
+.ah-sum-purple .ah-sum-icon {
+  background: linear-gradient(135deg, #f3e8ff, #e1bee7);
+}
+.ah-sum-purple .ah-sum-icon svg { color: #8e44ad; }
+.ah-sum-purple .ah-sum-value { color: #8e44ad; }
+
+.ah-sum-green {
+  border-top: 4px solid #27ae60;
+}
+.ah-sum-green::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #27ae60, #2ecc71);
+  border-radius: var(--ah-radius) var(--ah-radius) 0 0;
+}
+.ah-sum-green .ah-sum-icon {
+  background: linear-gradient(135deg, #e8f8f0, #c8e6c9);
+}
+.ah-sum-green .ah-sum-icon svg { color: #27ae60; }
+.ah-sum-green .ah-sum-value { color: #27ae60; }
+
+.ah-sum-orange {
+  border-top: 4px solid #e67e22;
+}
+.ah-sum-orange::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #e67e22, #f39c12);
+  border-radius: var(--ah-radius) var(--ah-radius) 0 0;
+}
+.ah-sum-orange .ah-sum-icon {
+  background: linear-gradient(135deg, #fff3e0, #ffe0b2);
+}
+.ah-sum-orange .ah-sum-icon svg { color: #e67e22; }
+.ah-sum-orange .ah-sum-value { color: #e67e22; }
+
+.ah-sum-teal {
+  border-top: 4px solid #00b894;
+}
+.ah-sum-teal::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #00b894, #55efc4);
+  border-radius: var(--ah-radius) var(--ah-radius) 0 0;
+}
+.ah-sum-teal .ah-sum-icon {
+  background: linear-gradient(135deg, #e0f7fa, #b2ebf2);
+}
+.ah-sum-teal .ah-sum-icon svg { color: #00897b; }
+.ah-sum-teal .ah-sum-value { color: #00b894; }
+
+.ah-sum-red {
+  border-top: 4px solid #e74c3c;
+}
+.ah-sum-red::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #e74c3c, #ff7675);
+  border-radius: var(--ah-radius) var(--ah-radius) 0 0;
+}
+.ah-sum-red .ah-sum-icon {
+  background: linear-gradient(135deg, #fde8e8, #f9cccc);
+}
+.ah-sum-red .ah-sum-icon svg { color: #e74c3c; }
+.ah-sum-red .ah-sum-value { color: #e74c3c; }
+
+.ah-sum-dark-teal {
+  border-top: 4px solid #0984e3;
+}
+.ah-sum-dark-teal::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #0984e3, #74b9ff);
+  border-radius: var(--ah-radius) var(--ah-radius) 0 0;
+}
+.ah-sum-dark-teal .ah-sum-icon {
+  background: linear-gradient(135deg, #e0f2fe, #bae6fd);
+}
+.ah-sum-dark-teal .ah-sum-icon svg { color: #0984e3; }
+.ah-sum-dark-teal .ah-sum-value { color: #0984e3; }
+
+/* ── Panel (Activity Log card) ── */
+.ah-panel {
+  background: var(--white);
+  border-left: 4px solid var(--activity);
+  position: relative;
+}
+.ah-panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+  border-radius: 18px 18px 0 0;
+}
+
+.ah-count-badge {
+  font-size: 10px;
+  background: linear-gradient(135deg, #e8e0ff, #d7bde2);
+  color: #6c5ce7;
+  padding: 3px 12px;
+  border-radius: 20px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  margin-left: auto;
+  border: 1px solid #c8b6f0;
+}
+
+/* ── Empty State ── */
+.ah-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.7;
+}
+.ah-empty strong {
+  color: var(--text-main);
+}
+.ah-empty svg {
+  display: block;
+  margin: 0 auto 10px;
+}
+
+/* ── History Table ── */
+.ah-table-wrap {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+}
+
+.ah-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ah-table thead {
+  background: linear-gradient(90deg, #f0f5fd, #e8f0fe);
+}
+
+.ah-table th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 12px 14px;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+
+.ah-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  background: var(--white);
+}
+
+.ah-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ah-table tbody tr {
+  transition: background .15s, transform .15s;
+}
+
+.ah-table tbody tr:hover {
+  background: #f8faff;
+}
+
+/* Table user cell */
+.ah-table-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.ah-table-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: #fff;
+  font-family: 'Poppins', sans-serif;
+  font-weight: 800;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ah-avatar-admin {
+  background: linear-gradient(135deg, #e74c3c, #6c5ce7);
+}
+.ah-avatar-developer {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+}
+.ah-avatar-qa {
+  background: linear-gradient(135deg, #e67e22, #f39c12);
+}
+
+/* ── Dark teal stat pill ── */
+.ra-stat-dark-teal {
+  background: linear-gradient(135deg, #e0f2fe, #bae6fd);
+  color: #0984e3;
+  font-family: 'Poppins', sans-serif;
+  font-weight: 800;
+  font-size: 13px;
+  padding: 3px 12px;
+  border-radius: 8px;
+  display: inline-block;
+  min-width: 32px;
+  text-align: center;
+}
+
+/* ── Date Navigation ── */
+.ah-date-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.ah-date-nav label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+
+.ah-date-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ah-date-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--white);
+  color: var(--text-muted);
+  text-decoration: none;
+  border: 1.5px solid var(--border);
+  transition: all .2s;
+  min-width: 56px;
+}
+.ah-date-chip:hover {
+  border-color: #3a7bd5;
+  color: #3a7bd5;
+  background: #eef4fd;
+  box-shadow: 0 2px 10px rgba(58,123,213,.12);
+  transform: translateY(-1px);
+}
+.ah-date-chip.active {
+  background: linear-gradient(135deg, #3a7bd5, #4facfe);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2px 10px rgba(58,123,213,.3);
+}
+
+/* ── Sidebar active state ── */
+.sb-active {
+  background: linear-gradient(90deg, rgba(108,92,231,.1), rgba(108,92,231,.06)) !important;
+  color: #6c5ce7 !important;
+  font-weight: 700 !important;
+  border-right: none !important;
+  position: relative;
+}
+.sb-active::before {
+  content: '' !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 20% !important;
+  bottom: 20% !important;
+  width: 3px !important;
+  border-radius: 0 3px 3px 0 !important;
+  background: linear-gradient(180deg, #6c5ce7, #a29bfe) !important;
+  margin-left: -8px !important;
+}
+.sb-active svg {
+  opacity: 1 !important;
+  color: #6c5ce7 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 1200px) {
+  .ah-summary-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1024px) {
+  .ah-summary-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  .ah-sum-value {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 768px) {
+  .ah-filter-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ah-filter-group {
+    width: 100%;
+  }
+  .ah-input {
+    width: 100%;
+  }
+  .ah-btn {
+    justify-content: center;
+    width: 100%;
+  }
+  .ah-btn-snapshot {
+    margin-left: 0;
+  }
+  .ah-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .ah-table {
+    font-size: 12px;
+  }
+  .ah-table th,
+  .ah-table td {
+    padding: 8px 8px;
+  }
+  .ah-date-chips {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .ah-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .ah-sum-value {
+    font-size: 20px;
+  }
+  .ah-sum-icon {
+    width: 32px;
+    height: 32px;
+  }
+  .ah-sum-icon svg {
+    width: 15px;
+    height: 15px;
+  }
+  .ah-filter-bar {
+    padding: 14px 16px;
+  }
+  .ah-date-chip {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+}
