@@ -137,6 +137,7 @@ function cat_class(string $c): string {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>TestiFy — Technologies</title>
+<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <style>
 /* ═══════════════════════════════════════════════════════════════
@@ -410,7 +411,7 @@ tbody td { padding:13px 16px; font-size:13.5px; vertical-align:middle; }
   <div class="main">
     <div class="page-title">
       <h1>Technologies</h1>
-      <span class="badge-page">Management</span>
+      <span class="badge-page">Tech Center</span>
     </div>
 
     <div class="toolbar">

@@ -497,8 +497,12 @@ $clients_list = [];
 $c_res = $conn->query("SELECT id, name FROM clients WHERE status='active' ORDER BY name");
 if ($c_res) while ($r = $c_res->fetch_assoc()) $clients_list[] = $r;
 
+// ════════════════════════════════════════════
+//  ONLY ACTIVE PROJECTS — Inactive projects
+//  are hidden from Test Cases dropdown
+// ════════════════════════════════════════════
 $projects_list = [];
-$p_res = $conn->query("SELECT id, client_id, name FROM projects ORDER BY name ASC");
+$p_res = $conn->query("SELECT id, client_id, name FROM projects WHERE action = 'active' ORDER BY name ASC");
 if ($p_res) while ($r = $p_res->fetch_assoc()) $projects_list[] = $r;
 
 $requirements_list  = [];
@@ -693,6 +697,7 @@ function spill($cur, $id, $type, $opts) {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>TestiFy — Test Cases</title>
+<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="../css/a_test_case.css"/>
 </head>
@@ -1311,7 +1316,7 @@ function openAdd(){
   document.getElementById('fKeepVid').value='[]';
   document.getElementById('fReqHidden').value='';
   loadReqsForForm(pid,preReq,true);
-  loadDevsForForm(pid); /* Load project-specific FE/BE developers */
+  loadDevsForForm(pid);
   oFrm();
   setTimeout(scrollModalToTop,50);
 }
@@ -1380,7 +1385,7 @@ function openEdit(d){
   document.getElementById('fScrFile').value='';
   document.getElementById('fVidFile').value='';
   loadReqsForForm(d.project_id,d.requirement,true);
-  loadDevsForForm(d.project_id, d.assigned_to); /* Load project-specific FE/BE developers with pre-select */
+  loadDevsForForm(d.project_id, d.assigned_to);
   oFrm();
   setTimeout(scrollModalToTop,50);
 }

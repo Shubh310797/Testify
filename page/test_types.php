@@ -95,6 +95,7 @@ if ($res) {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>TestiFy — Testing Types</title>
+<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <style>
 /* ═══════════════════════════════════════════════════════════════
@@ -403,9 +404,9 @@ textarea.form-control { resize:vertical; min-height:100px; }
                       onclick='openEditModal(<?= htmlspecialchars(json_encode($tt), ENT_QUOTES) ?>)'>
                       <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                     </button>
-                    <button class="btn-icon del" title="Delete" onclick="openConfirm(<?= $tt['id'] ?>, '<?= addslashes(htmlspecialchars($tt['name'])) ?>')">
+                    <!-- <button class="btn-icon del" title="Delete" onclick="openConfirm(<?= $tt['id'] ?>, '<?= addslashes(htmlspecialchars($tt['name'])) ?>')">
                       <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                    </button>
+                    </button> -->
                   </div>
                 </td>
               </tr>

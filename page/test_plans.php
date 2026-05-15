@@ -296,6 +296,7 @@ function fmt_date($d) { return $d ? date('d M Y', strtotime($d)) : '—'; }
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover"/>
 <title>TestiFy — Test Plans</title>
+<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <style>
 /* ═══════════════════════════════════════════════════════════════
@@ -768,7 +769,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
 <div class="main">
   <div class="page-title">
     <h1>Test Plans</h1>
-    <span class="badge-page">Management</span>
+    <span class="badge-page">Workspace</span>
   </div>
 
   <!-- TOOLBAR -->
@@ -898,9 +899,9 @@ textarea.form-control { resize:vertical; min-height:80px; }
                   <button class="btn-icon edit" onclick='openEditModal(<?= json_encode($tp) ?>)'>
                     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>
-                  <button class="btn-icon del" onclick="confirmDelete(<?= $tp['id'] ?>)">
+                  <!-- <button class="btn-icon del" onclick="confirmDelete(<?= $tp['id'] ?>)">
                     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                  </button>
+                  </button> -->
                 </div>
               </td>
             </tr>

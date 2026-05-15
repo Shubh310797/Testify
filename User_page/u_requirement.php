@@ -1,30 +1,93 @@
 <?php
-// ── page/client/requirements.php ─────────────────────────────
+// ── user_page/u_requirement.php ─────────────────────────────
+// USER VERSION: Requirements from user's assigned projects only
+// Developer = Add/Edit/Delete, QA = View Only
 session_start();
-
 include '../config/db.php';
 
  $msg      = '';
  $msg_type = '';
 
-if (isset($_GET['added']))   { $msg = 'Requirement added successfully!';   $msg_type = 'success'; }
-elseif (isset($_GET['updated'])) { $msg = 'Requirement updated!';          $msg_type = 'success'; }
-elseif (isset($_GET['deleted']))  { $msg = 'Requirement deleted.';          $msg_type = 'success'; }
+// ════════════════════════════════════════════════════════
+//  SMART SESSION DETECTION
+// ════════════════════════════════════════════════════════
+ $current_user_id = null;
+ $current_user_name = $_SESSION['name'] ?? '';
+ $current_user_role = $_SESSION['role'] ?? '';
+
+ $session_keys = ['user_id', 'id', 'user.id', 'uid', 'userId'];
+foreach ($session_keys as $key) {
+    if (isset($_SESSION[$key]) && is_numeric($_SESSION[$key])) {
+        $current_user_id = (int)$_SESSION[$key];
+        break;
+    }
+}
+if (!$current_user_id && !empty($current_user_name)) {
+    $lk = $conn->prepare("SELECT id, role FROM users WHERE name = ? OR username = ? LIMIT 1");
+    $lk->bind_param('ss', $current_user_name, $current_user_name);
+    $lk->execute();
+    $lr = $lk->get_result()->fetch_assoc();
+    $lk->close();
+    if ($lr) {
+        $current_user_id = (int)$lr['id'];
+        if (empty($current_user_role)) $current_user_role = $lr['role'];
+    }
+}
+
+// ════════════════════════════════════════════════════════
+//  ROLE CHECK
+// ════════════════════════════════════════════════════════
+ $is_developer = in_array(strtolower($current_user_role), ['developer', 'lead']);
+ $is_qa        = in_array(strtolower($current_user_role), ['tester', 'qa']);
+
+if (isset($_GET['added']))     { $msg = 'Requirement added successfully!';   $msg_type = 'success'; }
+elseif (isset($_GET['updated']))   { $msg = 'Requirement updated!';              $msg_type = 'success'; }
+elseif (isset($_GET['deleted']))   { $msg = 'Requirement deleted.';              $msg_type = 'success'; }
+elseif (isset($_GET['add_err']))   { $msg = 'Project, Title, Description and Priority are required.'; $msg_type = 'error'; }
+elseif (isset($_GET['edit_err']))  { $msg = 'Project, Title and Priority are required.';              $msg_type = 'error'; }
+elseif (isset($_GET['import_err'])){ $msg = 'Please select a project for import.';              $msg_type = 'error'; }
+elseif (isset($_GET['no_access'])){ $msg = 'Access Denied! QA does not have add/edit permission.';  $msg_type = 'error'; }
 elseif (isset($_GET['imported'])) {
     $imp  = (int)$_GET['imported'];
     $errs = (int)($_GET['imp_err'] ?? 0);
-    $msg  = "CSV se $imp requirement(s) import ho gaye!";
-    if ($errs) $msg .= " ($errs rows skip ho gaye — title missing ya project not found tha.)";
+    $msg  = "$imp requirement(s) imported successfully from CSV!";
+    if ($errs) $msg .= " ($errs rows skipped — title missing or project not found.)";
     $msg_type = 'success';
 }
 
+// ════════════════════════════════════════════════════════
+//  GET USER'S ASSIGNED PROJECT IDS
+// ════════════════════════════════════════════════════════
+ $user_project_ids = [];
+if ($current_user_id) {
+    $upRes = $conn->query("
+        SELECT DISTINCT p.id FROM projects p
+        LEFT JOIN project_frontend_devs pfd ON pfd.project_id = p.id AND pfd.user_id = $current_user_id
+        LEFT JOIN project_backend_devs pbd ON pbd.project_id = p.id AND pbd.user_id = $current_user_id
+        LEFT JOIN project_qa_team pqt ON pqt.project_id = p.id AND pqt.user_id = $current_user_id
+        WHERE pfd.user_id = $current_user_id OR pbd.user_id = $current_user_id OR pqt.user_id = $current_user_id
+        OR p.project_lead_id = $current_user_id OR p.qa_lead_id = $current_user_id
+    ");
+    if ($upRes) { while ($up = $upRes->fetch_assoc()) $user_project_ids[] = (int)$up['id']; }
+}
+ $user_project_ids_str = !empty($user_project_ids) ? implode(',', $user_project_ids) : '0';
+
+// ════════════════════════════════════════════════════════
+//  IMPORT CSV (Developer Only)
+// ════════════════════════════════════════════════════════
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'import_csv') {
+    if (!$is_developer) {
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?no_access=1');
+        exit;
+    }
     $import_project_id = (int)($_POST['import_project_id'] ?? 0);
 
     if (!$import_project_id) {
-        $msg = 'Import ke liye pehle project select karein.'; $msg_type = 'error';
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?import_err=1');
+        exit;
     } elseif (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
-        $msg = 'CSV file upload nahi hui. Dobara try karein.'; $msg_type = 'error';
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?import_err=1');
+        exit;
     } else {
         $file     = $_FILES['csv_file']['tmp_name'];
         $handle   = fopen($file, 'r');
@@ -125,7 +188,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
     )
 ");
 
+// ════════════════════════════════════════════════════════
+//  DELETE (Developer Only)
+// ════════════════════════════════════════════════════════
 if (isset($_GET['delete'])) {
+    if (!$is_developer) {
+        if (isset($_GET['ajax'])) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'error' => 'Access Denied!']);
+            exit;
+        }
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?no_access=1');
+        exit;
+    }
     $del_id = (int)$_GET['delete'];
     $stmt = $conn->prepare("DELETE FROM requirements WHERE id = ?");
     $stmt->bind_param('i', $del_id);
@@ -140,7 +215,14 @@ if (isset($_GET['delete'])) {
     exit;
 }
 
+// ════════════════════════════════════════════════════════
+//  ADD (Developer Only)
+// ════════════════════════════════════════════════════════
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add') {
+    if (!$is_developer) {
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?no_access=1');
+        exit;
+    }
     $project_id  = (int)($_POST['project_id'] ?? 0);
     $title       = trim($_POST['title']              ?? '');
     $description = trim($_POST['description']        ?? '');
@@ -157,30 +239,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     $exp_del = $exp_del ?: null;
     $act_del = $act_del ?: null;
     if (!$project_id || !$title || !$description || !$priority) {
-        $msg = 'Project, Title, Description aur Priority required hain.'; $msg_type = 'error';
-    } else {
-        $stmt = $conn->prepare(
-            "INSERT INTO requirements
-             (project_id, title, description, priority, reported_date, expected_delivery, actual_delivery,
-              is_developed, is_tested, is_delivered, uat_done, bug_after_uat, bug_fixed)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
-        );
-        $stmt->bind_param('issssssiiiiii',
-            $project_id, $title, $description, $priority,
-            $rep_date, $exp_del, $act_del,
-            $is_dev, $is_tested, $is_del, $uat, $bug_uat, $bug_fixed
-        );
-        if ($stmt->execute()) {
-            header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?added=1');
-            exit;
-        } else {
-            $msg = 'Error: ' . htmlspecialchars($stmt->error); $msg_type = 'error';
-        }
-        $stmt->close();
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?add_err=1');
+        exit;
     }
+    $stmt = $conn->prepare(
+        "INSERT INTO requirements
+         (project_id, title, description, priority, reported_date, expected_delivery, actual_delivery,
+          is_developed, is_tested, is_delivered, uat_done, bug_after_uat, bug_fixed)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    );
+    $stmt->bind_param('issssssiiiiii',
+        $project_id, $title, $description, $priority,
+        $rep_date, $exp_del, $act_del,
+        $is_dev, $is_tested, $is_del, $uat, $bug_uat, $bug_fixed
+    );
+    if ($stmt->execute()) {
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?added=1');
+        exit;
+    } else {
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?add_err=1');
+        exit;
+    }
+    $stmt->close();
 }
 
+// ════════════════════════════════════════════════════════
+//  EDIT (Developer Only)
+// ════════════════════════════════════════════════════════
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit') {
+    if (!$is_developer) {
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?no_access=1');
+        exit;
+    }
     $edit_id     = (int)($_POST['edit_id']           ?? 0);
     $project_id  = (int)($_POST['project_id']        ?? 0);
     $title       = trim($_POST['title']              ?? '');
@@ -199,35 +289,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
     $exp_del = $exp_del ?: null;
     $act_del = $act_del ?: null;
     if (!$project_id || !$title || !$priority) {
-        $msg = 'Project, Title aur Priority required hain.'; $msg_type = 'error';
-    } else {
-        $stmt = $conn->prepare(
-            "UPDATE requirements SET
-             project_id=?, title=?, description=?, priority=?, status=?,
-             reported_date=?, expected_delivery=?, actual_delivery=?,
-             is_developed=?, is_tested=?, is_delivered=?, uat_done=?, bug_after_uat=?, bug_fixed=?
-             WHERE id=?"
-        );
-        $stmt->bind_param('isssssssiiiiiii',
-            $project_id, $title, $description, $priority, $status,
-            $rep_date, $exp_del, $act_del,
-            $is_dev, $is_tested, $is_del, $uat, $bug_uat, $bug_fixed,
-            $edit_id
-        );
-        if ($stmt->execute()) {
-            header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?updated=1');
-            exit;
-        } else {
-            $msg = 'Error: ' . htmlspecialchars($stmt->error); $msg_type = 'error';
-        }
-        $stmt->close();
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?edit_err=1');
+        exit;
     }
+    $stmt = $conn->prepare(
+        "UPDATE requirements SET
+         project_id=?, title=?, description=?, priority=?, status=?,
+         reported_date=?, expected_delivery=?, actual_delivery=?,
+         is_developed=?, is_tested=?, is_delivered=?, uat_done=?, bug_after_uat=?, bug_fixed=?
+         WHERE id=?"
+    );
+    $stmt->bind_param('isssssssiiiiiii',
+        $project_id, $title, $description, $priority, $status,
+        $rep_date, $exp_del, $act_del,
+        $is_dev, $is_tested, $is_del, $uat, $bug_uat, $bug_fixed,
+        $edit_id
+    );
+    if ($stmt->execute()) {
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?updated=1');
+        exit;
+    } else {
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?edit_err=1');
+        exit;
+    }
+    $stmt->close();
 }
 
+// ════════════════════════════════════════════════════════
+//  FETCH USER'S PROJECTS (for dropdowns)
+// ════════════════════════════════════════════════════════
  $projects = [];
- $pr = $conn->query("SELECT id, name FROM projects ORDER BY name ASC");
-if ($pr) while ($row = $pr->fetch_assoc()) $projects[] = $row;
+if (!empty($user_project_ids)) {
+    $pr = $conn->query("SELECT id, name FROM projects WHERE id IN ($user_project_ids_str) ORDER BY name ASC");
+    if ($pr) while ($row = $pr->fetch_assoc()) $projects[] = $row;
+}
 
+// ════════════════════════════════════════════════════════
+//  FILTER & FETCH REQUIREMENTS (only from user's projects)
+// ════════════════════════════════════════════════════════
  $filter_project  = (int)($_GET['filter_project']  ?? 0);
  $filter_priority = trim($_GET['filter_priority']  ?? '');
  $filter_status   = trim($_GET['filter_status']    ?? '');
@@ -240,8 +339,8 @@ if ($pr) while ($row = $pr->fetch_assoc()) $projects[] = $row;
  $total_pages   = 1;
  $page          = 1;
 
-if ($filters_applied) {
-    $where   = [];
+if ($filters_applied && !empty($user_project_ids)) {
+    $where   = ["r.project_id IN ($user_project_ids_str)"];
     $params  = [];
     $types   = '';
     if ($filter_project) { $where[] = 'r.project_id = ?'; $params[] = $filter_project; $types .= 'i'; }
@@ -252,7 +351,7 @@ if ($filters_applied) {
         $where[] = '(r.title LIKE ? OR r.description LIKE ?)';
         $params[] = $like; $params[] = $like; $types .= 'ss';
     }
-    $whereStr = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    $whereStr = 'WHERE ' . implode(' AND ', $where);
     $cstmt = $conn->prepare("SELECT COUNT(*) FROM requirements r $whereStr");
     if ($types) { $cstmt->bind_param($types, ...$params); }
     $cstmt->execute();
@@ -281,7 +380,7 @@ if ($filters_applied) {
 }
 
  $edit_req = null;
-if (isset($_GET['edit'])) {
+if (isset($_GET['edit']) && $is_developer) {
     $eid  = (int)$_GET['edit'];
     $stmt = $conn->prepare("SELECT * FROM requirements WHERE id = ?");
     $stmt->bind_param('i', $eid); $stmt->execute();
@@ -320,11 +419,17 @@ function status_label(string $s): string {
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TestiFy — Requirements</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover"/>
+<title>TestiFy — My Requirements</title>
+<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
+
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <style>
+/* ═══════════════════════════════════════════════════════════════
+   COLORFUL THEME — Fully Responsive
+   ═══════════════════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
 :root {
   --blue-dark:  #3a7bd5;
   --blue-mid:   #4a90d9;
@@ -333,263 +438,278 @@ function status_label(string $s): string {
   --text-muted: #6b7fa3;
   --border:     #dde4f0;
   --white:      #ffffff;
-  --bg:         #f8faff;
+  --bg:         #f0f4ff;
   --red:        #e74c3c;
   --green:      #27ae60;
-  --orange:     #e67e22;
+  --green-mid:  #2ecc71;
   --purple:     #8e44ad;
+  --purple-mid: #9b59b6;
+  --orange:     #e67e22;
   --sb-w:       240px;
   --nb-h:       60px;
 }
+
 body { min-height:100vh; background:var(--bg); font-family:'Nunito',sans-serif; color:var(--text-main); overflow-x:hidden; }
 
-/* ── NAVBAR ── */
-.navbar {
-  background:var(--white);
-  border-bottom:1.5px solid var(--border);
-  display:flex; align-items:center; justify-content:space-between;
-  padding:0 20px;
-  height:var(--nb-h);
-  position:fixed; top:0; left:0; right:0;
-  z-index:300;
-  box-shadow:0 2px 16px rgba(74,144,217,.09);
-}
-.navbar-logo {
-  font-family:'Poppins',sans-serif; font-weight:800; font-size:20px;
-  background:linear-gradient(90deg,var(--blue-dark),var(--blue-light));
-  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
-  letter-spacing:.5px; cursor:default; flex-shrink:0; text-decoration:none;
-  display:flex; align-items:center; gap:10px;
-}
+/* ══ NAVBAR ══ */
+.navbar { background:linear-gradient(90deg,#ffffff,#f8faff); border-bottom:2px solid transparent; border-image:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid),var(--orange)) 1; display:flex; align-items:center; justify-content:space-between; padding:0 20px; height:var(--nb-h); position:fixed; top:0; left:0; right:0; z-index:300; box-shadow:0 2px 20px rgba(74,144,217,.1); }
+.nblogo { font-family:'Poppins',sans-serif; font-weight:800; font-size:22px; background:linear-gradient(135deg,var(--blue-dark),var(--purple-mid),var(--orange)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-decoration:none; white-space:nowrap; display:flex; align-items:center; gap:10px; }
 
-/* Hamburger */
-.ham {
-  display:none; flex-direction:column; justify-content:center; gap:5px;
-  width:40px; height:40px; border:none; background:transparent;
-  cursor:pointer; padding:8px; border-radius:8px; transition:.2s;
-}
+.ham { display:none; flex-direction:column; justify-content:center; gap:5px; width:40px; height:40px; border:none; background:transparent; cursor:pointer; padding:8px; border-radius:8px; transition:.2s; flex-shrink:0; }
 .ham:hover { background:#eef4fd; }
-.ham span { display:block; height:2px; border-radius:2px; background:var(--text-main); transition:.3s; }
-.ham.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
+.ham span { display:block; height:2.5px; width:22px; border-radius:2px; background:var(--text-main); transition:.3s; }
+.ham.open span:nth-child(1) { transform:translateY(7.5px) rotate(45deg); }
 .ham.open span:nth-child(2) { opacity:0; transform:scaleX(0); }
-.ham.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
+.ham.open span:nth-child(3) { transform:translateY(-7.5px) rotate(-45deg); }
 
-.navbar-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
-.navbar-username { font-size:13px; font-weight:600; color:var(--text-muted); white-space:nowrap; display:flex; align-items:center; gap:8px; }
-.nb-role { font-size:11px; font-weight:700; color:#1565c0; background:#e3f2fd; padding:2px 8px; border-radius:6px; text-transform:capitalize; letter-spacing:.5px; white-space:nowrap; }
-.btn-logout { padding:7px 14px; border-radius:8px; border:1.5px solid var(--blue-mid); background:transparent; color:var(--blue-mid); font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; transition:.2s; white-space:nowrap; text-decoration:none; display:inline-flex; align-items:center; }
-.btn-logout:hover { background:var(--blue-mid); color:#fff; }
+.nb-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+.nb-user { font-size:16px; color:var(--text-muted); font-weight:600; white-space:nowrap; display:flex; align-items:center; gap:8px; }
+.nb-role { font-size:14px; font-weight:700; background:linear-gradient(135deg,#e3f2fd,#f3e8ff); color:#7c3aed; padding:2px 10px; border-radius:8px; text-transform:capitalize; letter-spacing:.5px; white-space:nowrap; border:1px solid #e9d5ff; }
+.blgout { padding:7px 16px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--red),#c0392b); color:#fff; text-decoration:none; font-weight:700; font-size:13px; white-space:nowrap; transition:.2s; box-shadow:0 2px 10px rgba(231,76,60,.2); }
+.blgout:hover { box-shadow:0 4px 18px rgba(231,76,60,.35); transform:translateY(-1px); }
 
-/* ── SIDEBAR ── */
-.sidebar {
-  position:fixed; top:var(--nb-h); left:0; bottom:0;
-  width:var(--sb-w); background:var(--white);
-  border-right:1.5px solid var(--border);
-  z-index:250; overflow-y:auto; overflow-x:hidden;
-  transition:transform .28s cubic-bezier(.4,0,.2,1);
-  box-shadow:2px 0 20px rgba(74,144,217,.06);
-  padding-bottom:24px;
-}
-.sidebar-overlay {
-  display:none; position:fixed; inset:0; top:var(--nb-h);
-  background:rgba(30,45,80,.4); z-index:240; backdrop-filter:blur(2px);
-}
-.sb-home {
-  display:flex; align-items:center; gap:10px;
-  padding:12px 16px; margin:8px 8px 2px;
-  border-radius:10px; text-decoration:none;
-  color:var(--text-main); font-size:13.5px; font-weight:700;
-  transition:.15s; background:#f8faff; border:1px solid var(--border);
-}
-.sb-home:hover { background:#eef4fd; color:var(--blue-dark); }
-.sb-home svg { width:16px; height:16px; opacity:.7; }
+/* ══ SIDEBAR ══ */
+.sidebar { position:fixed; top:var(--nb-h); left:0; bottom:0; width:var(--sb-w); background:linear-gradient(180deg,#ffffff,#f8faff); border-right:1.5px solid var(--border); z-index:250; overflow-y:auto; overflow-x:hidden; transition:transform .28s cubic-bezier(.4,0,.2,1); box-shadow:2px 0 20px rgba(74,144,217,.06); padding-bottom:24px; }
+.sidebar-overlay { display:none; position:fixed; inset:0; top:var(--nb-h); background:rgba(30,45,80,.4); z-index:240; backdrop-filter:blur(2px); }
+.sidebar-overlay.open { display:block; }
+
 .sb-section { padding:18px 14px 6px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
-.sb-link {
-  display:flex; align-items:center; gap:10px;
-  padding:9px 16px; margin:1px 8px; border-radius:10px;
-  text-decoration:none; color:var(--text-main);
-  font-size:13.5px; font-weight:600; transition:.15s; position:relative;
-}
-.sb-link:hover { background:#eef4fd; color:var(--blue-dark); }
+.sb-link { display:flex; align-items:center; gap:10px; padding:9px 16px; margin:1px 8px; border-radius:10px; text-decoration:none; color:var(--text-main); font-size:13.5px; font-weight:600; transition:.15s; position:relative; }
+.sb-link:hover { background:linear-gradient(90deg,#eef4fd,#f0f7ff); color:var(--blue-dark); }
 .sb-link.active { background:linear-gradient(90deg,#e8f0fd,#f0f7ff); color:var(--blue-dark); font-weight:700; }
-.sb-link.active::before {
-  content:''; position:absolute; left:0; top:20%; bottom:20%;
-  width:3px; border-radius:0 3px 3px 0;
-  background:var(--blue-dark); margin-left:-8px;
-}
+.sb-link.active::before { content:''; position:absolute; left:0; top:20%; bottom:20%; width:3px; border-radius:0 3px 3px 0; background:linear-gradient(180deg,var(--blue-dark),var(--purple-mid)); margin-left:-8px; }
 .sb-link svg { width:16px; height:16px; flex-shrink:0; opacity:.7; }
 .sb-link.active svg { opacity:1; }
 
-/* ── PAGE WRAP ── */
-.page-wrap {
-  margin-left:var(--sb-w);
-  margin-top:var(--nb-h);
-  min-height:calc(100vh - var(--nb-h));
-  transition:margin-left .28s cubic-bezier(.4,0,.2,1);
-}
+.sb-home { display:flex; align-items:center; gap:10px; padding:12px 16px; margin:8px 8px 2px; border-radius:10px; text-decoration:none; color:var(--text-main); font-size:13.5px; font-weight:700; transition:.15s; background:linear-gradient(135deg,#f8faff,#eef4fd); border:1px solid var(--border); }
+.sb-home:hover { background:#eef4fd; color:var(--blue-dark); }
+.sb-home svg { width:16px; height:16px; opacity:.7; }
 
-/* ── MAIN ── */
-.main { max-width:1300px; margin:0 auto; padding:28px 24px 60px; }
+/* ══ LAYOUT WRAP ══ */
+.page-wrap { margin-left:var(--sb-w); margin-top:var(--nb-h); min-height:calc(100vh - var(--nb-h)); transition:margin-left .28s cubic-bezier(.4,0,.2,1); }
+
+/* ══ MAIN CONTENT ══ */
+.main { max-width:1400px; margin:0 auto; padding:28px 24px 60px; }
 .page-title { display:flex; align-items:center; gap:12px; margin-bottom:22px; flex-wrap:wrap; }
-.page-title h1 { font-family:'Poppins',sans-serif; font-weight:800; font-size:26px; color:var(--text-main); letter-spacing:-.5px; }
-.badge-page { background:linear-gradient(90deg,var(--blue-dark),var(--blue-light)); color:#fff; font-family:'Poppins',sans-serif; font-weight:700; font-size:10px; letter-spacing:2px; text-transform:uppercase; padding:5px 12px; border-radius:6px; }
+.page-title h1 { font-family:'Poppins',sans-serif; font-weight:800; font-size:26px; background:linear-gradient(135deg,var(--blue-dark),var(--purple)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; letter-spacing:-.5px; }
+.badge-page { background:linear-gradient(135deg,var(--blue-dark),var(--purple-mid)); color:#fff; font-family:'Poppins',sans-serif; font-weight:700; font-size:10px; letter-spacing:2px; text-transform:uppercase; padding:5px 14px; border-radius:8px; box-shadow:0 2px 10px rgba(142,68,173,.25); }
 
-/* ── TOOLBAR ── */
-.toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
-.toolbar-left { display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex:1; min-width:0; }
-.search-wrap { position:relative; flex:1; max-width:320px; }
-.search-wrap svg { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:15px; height:15px; color:var(--text-muted); pointer-events:none; }
-.search-input { width:100%; padding:9px 12px 9px 34px; border-radius:10px; border:1.5px solid var(--border); background:var(--white); font-family:'Nunito',sans-serif; font-size:13.5px; color:var(--text-main); outline:none; transition:border-color .2s,box-shadow .2s; height:38px; }
-.search-input:focus { border-color:var(--blue-mid); box-shadow:0 0 0 3px rgba(74,144,217,.12); }
-.btn-filter { height:38px; padding:0 16px; border-radius:10px; border:none; background:linear-gradient(90deg,#8e44ad,#c0392b); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; transition:opacity .2s; }
-.btn-filter:hover { opacity:.9; }
-.btn-clear { display:inline-flex; align-items:center; gap:4px; padding:0 12px; border-radius:10px; border:1.5px solid var(--border); background:var(--white); font-family:'Nunito',sans-serif; font-size:13px; font-weight:700; color:var(--text-muted); text-decoration:none; height:38px; flex-shrink:0; transition:background .15s; }
-.btn-clear:hover { background:#f0f5fd; }
-.toolbar-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
-.btn-template { height:36px; padding:0 14px; border-radius:10px; border:none; background:var(--green); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:opacity .2s; }
-.btn-template:hover { opacity:.9; }
-.btn-import { height:36px; padding:0 14px; border-radius:10px; border:none; background:var(--orange); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:opacity .2s; }
-.btn-import:hover { opacity:.9; }
-.btn-add { height:36px; padding:0 14px; border-radius:10px; border:none; background:linear-gradient(90deg,var(--blue-dark),var(--blue-light)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:opacity .2s; box-shadow:0 4px 14px rgba(74,144,217,.3); }
-.btn-add:hover { opacity:.92; }
+/* ══ QA ACCESS DENIED BANNER ══ */
+.qa-notice { background:linear-gradient(135deg,#fff3e0,#ffe0b2); border:1.5px solid #ffe0b2; border-radius:12px; padding:14px 18px; margin-bottom:18px; display:flex; align-items:center; gap:12px; font-size:13px; font-weight:700; color:#e65100; }
+.qa-notice svg { width:22px; height:22px; flex-shrink:0; }
 
-/* TABLE */
-.table-card { background:var(--white); border-radius:18px; border:1.5px solid var(--border); box-shadow:0 4px 20px rgba(74,144,217,.07); overflow:hidden; }
-.table-wrap { overflow-x:auto; }
-table { width:100%; border-collapse:collapse; min-width:1100px; }
-thead th { background:#f0f5fd; padding:13px 14px; text-align:left; font-size:11.5px; font-weight:700; color:var(--text-muted); letter-spacing:.8px; text-transform:uppercase; border-bottom:1.5px solid var(--border); white-space:nowrap; }
-tbody tr { border-bottom:1px solid var(--border); transition:background .15s; }
-tbody tr:last-child { border-bottom:none; }
-tbody tr:hover { background:#f5f8fe; }
-tbody td { padding:12px 14px; font-size:13px; vertical-align:middle; }
-.req-title { font-weight:700; color:var(--text-main); }
-.req-desc { font-size:11.5px; color:var(--text-muted); margin-top:2px; max-width:220px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+/* ══ TOOLBAR ══ */
+.toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; flex-wrap:wrap; }
+.toolbar-left { display:flex; align-items:center; gap:10px; flex:1; flex-wrap:wrap; min-width:0; }
 
-/* BADGES */
-.badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; white-space:nowrap; }
-.badge-low      { background:#e8f0fe; color:#3a7bd5; }
-.badge-medium   { background:#fef9e7; color:#b7770d; }
-.badge-high     { background:#fce8e8; color:#c0392b; }
-.badge-critical { background:#f5e6ff; color:#7d3c98; }
-.badge-open     { background:#e8f0fe; color:#1a5276; }
-.badge-inprog   { background:#fef5ec; color:#ca6f1e; }
-.badge-done     { background:#e8f8f0; color:#1e8449; }
-.badge-closed   { background:#f0f0f0; color:#5d6d7e; }
+.search-wrap { position:relative; flex:1; min-width:200px; max-width:340px; }
+.search-wrap svg { position:absolute; left:12px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:var(--text-muted); pointer-events:none; }
+.search-input { width:100%; padding:9px 14px 9px 36px; border-radius:10px; border:1.5px solid var(--border); background:var(--white); font-family:'Nunito',sans-serif; font-size:13.5px; color:var(--text-main); outline:none; transition:border-color .2s,box-shadow .2s; }
+.search-input:focus { border-color:var(--purple-mid); box-shadow:0 0 0 3px rgba(155,89,182,.12); }
 
-/* FLAGS */
-.flags { display:flex; flex-wrap:wrap; gap:4px; }
-.flag { display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:5px; white-space:nowrap; }
-.flag.yes { background:#e8f8f0; color:#1e8449; }
-.flag.no  { background:#f0f0f0; color:#95a5a6; }
+.btn-clear { display:inline-flex; align-items:center; gap:6px; padding:0 16px; border-radius:10px; border:none; background:linear-gradient(135deg,#e74c3c,#c0392b); font-family:'Nunito',sans-serif; font-size:13px; font-weight:700; color:#fff; text-decoration:none; height:38px; flex-shrink:0; transition:opacity .2s,transform .15s,box-shadow .2s; box-shadow:0 4px 14px rgba(231,76,60,.25); white-space:nowrap; }
+.btn-clear:hover { opacity:.92; transform:translateY(-2px); box-shadow:0 6px 20px rgba(231,76,60,.35); }
+.btn-clear svg { width:13px; height:13px; }
 
-.action-btns { display:flex; gap:6px; }
-.btn-icon { width:32px; height:32px; border-radius:8px; border:1.5px solid var(--border); background:var(--white); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .15s,border-color .15s; text-decoration:none; }
-.btn-icon svg { width:14px; height:14px; }
-.btn-icon.edit { color:var(--blue-mid); }
-.btn-icon.edit:hover { background:#eef4fd; border-color:var(--blue-mid); }
-.btn-icon.del { color:var(--red); }
-.btn-icon.del:hover { background:#fde8e8; border-color:var(--red); }
+.btn-filter { height:38px; padding:0 18px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--purple),var(--purple-mid)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; transition:opacity .2s,transform .15s,box-shadow .2s; box-shadow:0 4px 14px rgba(142,68,173,.28); white-space:nowrap; }
+.btn-filter:hover { opacity:.92; transform:translateY(-2px); box-shadow:0 8px 22px rgba(142,68,173,.38); }
+.btn-filter svg { width:14px; height:14px; }
 
-/* EMPTY */
-.empty-state { text-align:center; padding:60px 20px; color:var(--text-muted); }
-.empty-state svg { width:52px; height:52px; margin-bottom:14px; color:#c5d5e8; }
-.empty-state p { font-size:14px; font-weight:700; margin-bottom:4px; }
-.empty-state small { font-size:12.5px; }
+.toolbar-right { display:flex; align-items:center; gap:8px; flex-shrink:0; flex-wrap:wrap; }
 
-/* PAGINATION */
-.table-footer { padding:13px 20px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
-.footer-count { font-size:12.5px; color:var(--text-muted); font-weight:600; }
-.pagination { display:flex; align-items:center; gap:4px; }
-.pg-btn { min-width:32px; height:32px; padding:0 8px; border-radius:8px; border:1.5px solid var(--border); background:var(--white); font-family:'Nunito',sans-serif; font-size:13px; font-weight:700; color:var(--text-muted); cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; transition:background .15s,color .15s,border-color .15s; }
-.pg-btn:hover { background:#eef4fd; color:var(--blue-dark); border-color:var(--blue-mid); }
-.pg-btn.active { background:linear-gradient(90deg,var(--blue-dark),var(--blue-light)); color:#fff; border-color:transparent; }
-.pg-btn.disabled { opacity:.4; pointer-events:none; }
+.btn-template { height:38px; padding:0 16px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--green),var(--green-mid)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:opacity .2s,transform .15s,box-shadow .2s; box-shadow:0 4px 14px rgba(39,174,96,.3); white-space:nowrap; }
+.btn-template:hover { opacity:.92; transform:translateY(-2px); box-shadow:0 8px 22px rgba(39,174,96,.38); }
+.btn-template svg { width:14px; height:14px; }
 
-/* MODALS */
-.modal-overlay { display:none; position:fixed; inset:0; background:rgba(30,45,80,.45); backdrop-filter:blur(3px); z-index:500; align-items:center; justify-content:center; padding:16px; }
-.modal-overlay.open { display:flex; }
-.modal { background:var(--white); border-radius:20px; width:100%; max-width:580px; box-shadow:0 24px 64px rgba(30,45,80,.22); max-height:90vh; display:flex; flex-direction:column; overflow:hidden; }
-.modal > form { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
-.modal-header { display:flex; align-items:center; justify-content:space-between; padding:22px 24px 18px; border-bottom:1.5px solid var(--border); flex-shrink:0; }
-.modal-header h2 { font-family:'Poppins',sans-serif; font-weight:800; font-size:18px; }
-.modal-close { width:32px; height:32px; border-radius:8px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-muted); transition:background .15s,color .15s; }
-.modal-close:hover { background:#fde8e8; color:var(--red); }
-.modal-body { padding:22px 24px; overflow-y:auto; flex:1; min-height:0; }
-.modal-footer { padding:16px 24px 20px; border-top:1.5px solid var(--border); display:flex; gap:10px; justify-content:flex-end; flex-shrink:0; background:var(--white); }
-.form-group { margin-bottom:16px; }
-.form-group label { display:block; font-size:13px; font-weight:700; margin-bottom:6px; }
-.form-group label span { color:var(--red); }
-.form-control { width:100%; padding:10px 14px; border-radius:10px; border:1.5px solid var(--border); font-family:'Nunito',sans-serif; font-size:13.5px; color:var(--text-main); outline:none; transition:border-color .2s,box-shadow .2s; background:var(--white); }
-.form-control:focus { border-color:var(--blue-mid); box-shadow:0 0 0 3px rgba(74,144,217,.12); }
-.form-control::placeholder { color:#b0bdd6; }
-textarea.form-control { resize:vertical; min-height:90px; }
-.form-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-.check-section { background:#f8faff; border:1.5px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
-.check-section-title { font-size:12px; font-weight:700; color:var(--text-muted); letter-spacing:.8px; text-transform:uppercase; margin-bottom:12px; }
-.check-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.check-item { display:flex; align-items:center; gap:8px; cursor:pointer; }
-.check-item input[type="checkbox"] { width:16px; height:16px; accent-color:var(--blue-dark); cursor:pointer; border-radius:4px; flex-shrink:0; }
-.check-item span { font-size:13px; font-weight:600; color:var(--text-main); }
-.btn-save { padding:10px 26px; border-radius:10px; border:none; background:linear-gradient(90deg,var(--blue-dark),var(--blue-light)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:14px; cursor:pointer; box-shadow:0 4px 14px rgba(74,144,217,.28); transition:opacity .2s; }
-.btn-save:hover { opacity:.92; }
-.btn-cancel { padding:10px 22px; border-radius:10px; border:1.5px solid var(--border); background:transparent; color:var(--text-muted); font-family:'Nunito',sans-serif; font-weight:700; font-size:14px; cursor:pointer; transition:background .15s; }
-.btn-cancel:hover { background:#f0f5fd; }
+.btn-import { height:38px; padding:0 16px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--orange),#f39c12); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:opacity .2s,transform .15s,box-shadow .2s; box-shadow:0 4px 14px rgba(230,126,34,.3); white-space:nowrap; }
+.btn-import:hover { opacity:.92; transform:translateY(-2px); box-shadow:0 8px 22px rgba(230,126,34,.38); }
+.btn-import svg { width:14px; height:14px; }
 
-/* CONFIRM */
-.confirm-overlay { display:none; position:fixed; inset:0; background:rgba(30,45,80,.4); backdrop-filter:blur(2px); z-index:600; align-items:center; justify-content:center; padding:16px; }
-.confirm-overlay.open { display:flex; }
-.confirm-box { background:var(--white); border-radius:16px; padding:28px; max-width:360px; width:100%; box-shadow:0 20px 56px rgba(30,45,80,.2); text-align:center; }
-.confirm-box h3 { font-family:'Poppins',sans-serif; font-weight:800; font-size:16px; margin-bottom:8px; }
-.confirm-box p { font-size:13.5px; color:var(--text-muted); margin-bottom:20px; line-height:1.6; }
-.confirm-btns { display:flex; gap:10px; justify-content:center; }
-.btn-confirm-del { padding:9px 22px; border-radius:9px; border:none; background:var(--red); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer; transition:opacity .2s; }
-.btn-confirm-del:hover { opacity:.88; }
-.btn-confirm-cancel { padding:9px 22px; border-radius:9px; border:1.5px solid var(--border); background:transparent; color:var(--text-muted); font-family:'Nunito',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer; transition:background .15s; }
-.btn-confirm-cancel:hover { background:#f0f5fd; }
+.btn-add { padding:9px 20px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--blue-dark),var(--purple-mid)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:opacity .2s,transform .15s,box-shadow .2s; box-shadow:0 4px 14px rgba(58,123,213,.3); white-space:nowrap; flex-shrink:0; }
+.btn-add:hover { opacity:.92; transform:translateY(-2px); box-shadow:0 8px 22px rgba(58,123,213,.38); }
+.btn-add svg { width:15px; height:15px; }
 
-/* TOAST */
-.toast { position:fixed; bottom:28px; right:28px; z-index:999; display:flex; align-items:flex-start; gap:10px; padding:14px 18px; border-radius:12px; font-size:13px; font-weight:700; box-shadow:0 8px 28px rgba(30,45,80,.18); max-width:380px; line-height:1.5; }
-.toast.success { background:#e8f8f0; color:#1e8449; border:1.5px solid #a9dfbf; }
-.toast.error   { background:#fde8e8; color:#c0392b; border:1.5px solid #f1948a; }
-.toast svg { width:17px; height:17px; flex-shrink:0; margin-top:1px; }
-.toast-hide { opacity:0; transition:opacity .3s; }
-
-/* FILTER PANEL */
-.filter-panel { background:var(--white); border:1.5px solid var(--border); border-radius:14px; padding:18px 20px; margin-bottom:16px; display:none; }
-.filter-panel.open { display:block; }
+/* ══ FILTER PANEL ══ */
+.filter-panel { background:var(--white); border-radius:14px; border:1.5px solid var(--border); padding:0; margin-bottom:0; max-height:0; overflow:hidden; box-shadow:0 4px 20px rgba(74,144,217,.07); position:relative; transition:max-height .35s cubic-bezier(.4,0,.2,1), padding .35s cubic-bezier(.4,0,.2,1), margin-bottom .35s cubic-bezier(.4,0,.2,1), opacity .25s ease; opacity:0; }
+.filter-panel::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid),var(--orange)); border-radius:14px 14px 0 0; z-index:1; }
+.filter-panel.open { max-height:600px; padding:18px 20px; margin-bottom:16px; opacity:1; }
+.filter-panel-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.filter-panel-title { display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--text-main); }
+.filter-panel-title svg { color:var(--purple-mid); }
+.filter-active-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px rgba(39,174,96,.5); animation:dotPulse 1.5s ease infinite; }
+@keyframes dotPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.3)} }
+.filter-close-btn { width:24px; height:24px; border-radius:6px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-muted); transition:all .15s; flex-shrink:0; }
+.filter-close-btn:hover { background:linear-gradient(135deg,#fde8e8,#f9cccc); color:var(--red); transform:scale(1.08); }
+.filter-close-btn svg { width:12px; height:12px; }
 .filter-panel-inner { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; }
 .filter-panel .form-group { margin-bottom:0; flex:1; min-width:160px; }
 .filter-panel label { font-size:12px; }
 .filter-panel .form-control { height:38px; padding:0 12px; }
-.btn-apply { height:38px; padding:0 20px; border-radius:10px; border:none; background:linear-gradient(90deg,#8e44ad,#c0392b); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; flex-shrink:0; }
+.btn-apply { height:38px; padding:0 22px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--purple),var(--purple-mid)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; cursor:pointer; flex-shrink:0; box-shadow:0 4px 14px rgba(142,68,173,.28); transition:opacity .2s,transform .15s; }
+.btn-apply:hover { opacity:.92; transform:translateY(-1px); }
 
-/* ── RESPONSIVE ── */
+/* ══ TABLE CARD ══ */
+.table-card { background:var(--white); border-radius:18px; border:1.5px solid var(--border); box-shadow:0 4px 20px rgba(74,144,217,.07); overflow:hidden; position:relative; }
+.table-card::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid),var(--orange)); border-radius:18px 18px 0 0; z-index:1; }
+.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+table { width:100%; border-collapse:collapse; min-width:1100px; }
+thead th { background:linear-gradient(90deg,#f0f5fd,#eef4fd); padding:13px 14px; text-align:left; font-size:12px; font-weight:700; color:var(--text-muted); letter-spacing:.8px; text-transform:uppercase; border-bottom:1.5px solid var(--border); white-space:nowrap; }
+tbody tr { border-bottom:1px solid var(--border); transition:background .15s; }
+tbody tr:last-child { border-bottom:none; }
+tbody tr:hover { background:linear-gradient(90deg,#f5f8fe,#f8faff); box-shadow:inset 3px 0 0 var(--blue-mid); }
+tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
+.req-title { font-weight:700; color:var(--text-main); }
+.req-desc { font-size:11.5px; color:var(--text-muted); margin-top:2px; max-width:220px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+
+/* ══ BADGES ══ */
+.badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; letter-spacing:.3px; }
+.badge-low      { background:linear-gradient(135deg,#e8f0fe,#d4e4f7); color:#3a7bd5; border:1px solid #bdd4f0; }
+.badge-medium   { background:linear-gradient(135deg,#fef9e7,#fdebd0); color:#b7770d; border:1px solid #f9e79f; }
+.badge-high     { background:linear-gradient(135deg,#fde8e8,#f9cccc); color:#c0392b; border:1px solid #f5b7b1; }
+.badge-critical { background:linear-gradient(135deg,#f5e6ff,#e8d5f5); color:#7d3c98; border:1px solid #d7bde2; }
+.badge-open     { background:linear-gradient(135deg,#e8f0fe,#d4e4f7); color:#1a5276; border:1px solid #bdd4f0; }
+.badge-inprog   { background:linear-gradient(135deg,#fff3e0,#ffe0b2); color:#e65100; border:1px solid #ffe0b2; }
+.badge-done     { background:linear-gradient(135deg,#e8f8f0,#c6f0d6); color:#1e8449; border:1px solid #a9dfbf; }
+.badge-closed   { background:linear-gradient(135deg,#f0f0f0,#e8e8e8); color:#5d6d7e; border:1px solid #ddd; }
+
+/* ══ FLAGS ══ */
+.flags { display:flex; flex-wrap:wrap; gap:4px; }
+.flag { display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:6px; white-space:nowrap; }
+.flag.yes { background:linear-gradient(135deg,#e8f8f0,#c6f0d6); color:#1e8449; border:1px solid #a9dfbf; }
+.flag.no  { background:linear-gradient(135deg,#f5f5f5,#eee); color:#95a5a6; border:1px solid #ddd; }
+
+/* ══ ACTION BUTTONS ══ */
+.action-btns { display:flex; gap:6px; flex-wrap:nowrap; }
+.btn-icon { width:34px; height:34px; border-radius:10px; border:1.5px solid var(--border); background:var(--white); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .15s; flex-shrink:0; text-decoration:none; }
+.btn-icon svg { width:14px; height:14px; }
+.btn-icon.edit { color:var(--blue-mid); }
+.btn-icon.edit:hover { background:linear-gradient(135deg,#eef4fd,#d4e4f7); border-color:var(--blue-mid); transform:translateY(-2px); box-shadow:0 3px 10px rgba(58,123,213,.2); }
+.btn-icon.del { color:var(--red); }
+.btn-icon.del:hover { background:linear-gradient(135deg,#fde8e8,#f9cccc); border-color:var(--red); transform:translateY(-2px); box-shadow:0 3px 10px rgba(231,76,60,.2); }
+
+/* ══ EMPTY STATE ══ */
+.empty-state { text-align:center; padding:50px 20px; color:var(--text-muted); }
+.empty-state svg { width:48px; height:48px; margin-bottom:12px; color:#c5d5e8; }
+.empty-state p { font-size:14px; font-weight:600; }
+.empty-state small { font-size:12.5px; }
+
+/* ══ PAGINATION ══ */
+.table-footer { padding:13px 20px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; font-size:12.5px; color:var(--text-muted); font-weight:600; }
+.footer-count { font-size:12.5px; color:var(--text-muted); font-weight:600; }
+.pg-nav { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
+.pg-btn { min-width:34px; height:34px; padding:0 6px; border-radius:50%; border:1.5px solid var(--border); background:var(--white); display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; cursor:pointer; transition:all .15s; text-decoration:none; color:var(--text-muted); font-family:'Nunito',sans-serif; }
+.pg-btn:hover:not(.active):not(.disabled) { background:linear-gradient(135deg,#f0f5fd,#eef4fd); border-color:var(--blue-mid); transform:translateY(-2px); color:var(--blue-dark); box-shadow:0 3px 10px rgba(74,144,217,.15); }
+.pg-btn.active { background:linear-gradient(135deg,var(--blue-dark),var(--purple-mid)); color:#fff; border-color:transparent; box-shadow:0 3px 12px rgba(58,123,213,.3); }
+.pg-btn.disabled { opacity:.4; cursor:default; pointer-events:none; }
+.pg-btn svg { width:14px; height:14px; }
+
+/* ══ MODALS ══ */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(30,45,80,.45); backdrop-filter:blur(3px); z-index:500; align-items:center; justify-content:center; padding:16px; }
+.modal-overlay.open { display:flex; }
+.modal { background:var(--white); border-radius:20px; width:100%; max-width:480px; box-shadow:0 24px 64px rgba(30,45,80,.22); overflow:hidden; display:flex; flex-direction:column; position:relative; }
+.modal::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid)); border-radius:20px 20px 0 0; z-index:1; }
+.modal-header { display:flex; align-items:center; justify-content:space-between; padding:22px 24px 18px; border-bottom:1.5px solid var(--border); flex-shrink:0; }
+.modal-header h2 { font-family:'Poppins',sans-serif; font-weight:800; font-size:18px; background:linear-gradient(135deg,var(--blue-dark),var(--purple)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.modal-close { width:24px; height:24px; border-radius:6px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-muted); transition:background .15s,color .15s; flex-shrink:0; }
+.modal-close:hover { background:linear-gradient(135deg,#fde8e8,#f9cccc); color:var(--red); }
+.modal-close svg { width:12px; height:12px; }
+.modal form { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+.modal-body { padding:22px 24px; overflow-y:auto; flex:1; -webkit-overflow-scrolling:touch; max-height:75vh; }
+.modal-footer { padding:16px 24px 20px; border-top:1.5px solid var(--border); display:flex; gap:10px; justify-content:flex-end; flex-shrink:0; }
+
+/* ══ FORM ══ */
+.section-label { font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:1px; background:linear-gradient(135deg,var(--blue-dark),var(--purple-mid)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin:18px 0 10px; padding-bottom:6px; border-bottom:2px solid transparent; border-image:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid)) 1; }
+.section-label:first-child { margin-top:0; }
+.form-group { margin-bottom:14px; }
+.form-group label { display:block; font-size:13px; font-weight:700; color:var(--text-main); margin-bottom:6px; }
+.form-group label span { color:var(--red); }
+.form-control { width:100%; padding:10px 14px; border-radius:10px; border:1.5px solid var(--border); font-family:'Nunito',sans-serif; font-size:13.5px; color:var(--text-main); outline:none; transition:border-color .2s,box-shadow .2s; background:var(--white); }
+.form-control:focus { border-color:var(--purple-mid); box-shadow:0 0 0 3px rgba(155,89,182,.12); }
+.form-control::placeholder { color:#b0bdd6; }
+textarea.form-control { resize:vertical; min-height:80px; }
+.form-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+
+.check-section { background:linear-gradient(135deg,#f8faff,#f0f4ff); border:1.5px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px; position:relative; }
+.check-section::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid)); border-radius:12px 12px 0 0; }
+.check-section-title { font-size:12px; font-weight:700; color:var(--text-muted); letter-spacing:.8px; text-transform:uppercase; margin-bottom:10px; }
+.check-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.check-item { display:flex; align-items:center; gap:8px; cursor:pointer; padding:6px 8px; border-radius:8px; transition:background .15s; }
+.check-item:hover { background:linear-gradient(90deg,#eef4fd,#f0f7ff); }
+.check-item input[type="checkbox"] { width:18px; height:18px; accent-color:var(--purple-mid); cursor:pointer; border-radius:4px; flex-shrink:0; }
+.check-item span { font-size:13px; font-weight:600; color:var(--text-main); }
+
+.btn-save { padding:10px 26px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--blue-dark),var(--purple-mid)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:14px; cursor:pointer; transition:opacity .2s,transform .15s,box-shadow .2s; box-shadow:0 4px 14px rgba(58,123,213,.28); }
+.btn-save:hover { opacity:.92; transform:translateY(-1px); box-shadow:0 6px 20px rgba(58,123,213,.35); }
+.btn-cancel { padding:10px 22px; border-radius:10px; border:1.5px solid var(--border); background:transparent; color:var(--text-muted); font-family:'Nunito',sans-serif; font-weight:700; font-size:14px; cursor:pointer; transition:background .15s,color .15s; }
+.btn-cancel:hover { background:linear-gradient(135deg,#f0f5fd,#eef4fd); color:var(--text-main); }
+
+/* ══ TOAST ══ */
+.toast { position:fixed; bottom:28px; right:28px; z-index:999; display:flex; align-items:center; gap:10px; padding:13px 20px; border-radius:12px; font-size:13.5px; font-weight:700; box-shadow:0 8px 28px rgba(30,45,80,.18); min-width:240px; max-width:90vw; }
+.toast.success { background:linear-gradient(135deg,#e8f8f0,#c6f0d6); color:#1e8449; border:1.5px solid #a9dfbf; }
+.toast.error   { background:linear-gradient(135deg,#fde8e8,#f9cccc); color:#c0392b; border:1.5px solid #f5b7b1; }
+.toast svg { width:17px; height:17px; flex-shrink:0; }
+.toast-hide { opacity:0; transition:opacity .5s; }
+
+/* ══ CONFIRM ══ */
+.confirm-overlay { display:none; position:fixed; inset:0; background:rgba(30,45,80,.4); backdrop-filter:blur(2px); z-index:600; align-items:center; justify-content:center; padding:16px; }
+.confirm-overlay.open { display:flex; }
+.confirm-box { background:var(--white); border-radius:16px; padding:28px 28px 22px; max-width:360px; width:100%; box-shadow:0 20px 56px rgba(30,45,80,.2); text-align:center; position:relative; overflow:hidden; }
+.confirm-box::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg,var(--red),var(--orange)); }
+.confirm-box h3 { font-family:'Poppins',sans-serif; font-weight:800; font-size:16px; color:var(--text-main); margin-bottom:8px; }
+.confirm-box p { font-size:13.5px; color:var(--text-muted); margin-bottom:22px; line-height:1.6; }
+.confirm-btns { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+.btn-confirm-del { padding:9px 22px; border-radius:9px; border:none; background:linear-gradient(135deg,var(--red),#c0392b); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer; transition:opacity .2s,box-shadow .2s; box-shadow:0 3px 10px rgba(231,76,60,.25); }
+.btn-confirm-del:hover { opacity:.88; box-shadow:0 5px 16px rgba(231,76,60,.35); }
+.btn-confirm-cancel { padding:9px 22px; border-radius:9px; border:1.5px solid var(--border); background:transparent; color:var(--text-muted); font-family:'Nunito',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer; transition:background .15s; }
+.btn-confirm-cancel:hover { background:linear-gradient(135deg,#f0f5fd,#eef4fd); }
+
+/* ═══════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════ */
 @media(max-width:768px){
-  :root { --sb-w:260px; }
+  :root { --sb-w: 260px; --nb-h: 56px; }
   .ham { display:flex; }
-  .sidebar { transform:translateX(-100%); }
+  .nblogo { font-size:19px; }
+  .nb-user span:not(.nb-role) { display:none; }
+  .nb-role { display:none; }
+  .sidebar { transform:translateX(-100%); width:var(--sb-w); }
   .sidebar.open { transform:translateX(0); }
   .sidebar-overlay.open { display:block; }
   .page-wrap { margin-left:0; }
-  .navbar-username span:not(.nb-role) { display:none; }
-  .nb-role { display:none; }
-  .main { padding:16px 14px 48px; }
+  .main { padding:16px 12px 48px; }
   .page-title h1 { font-size:20px; }
-  .form-row, .check-grid { grid-template-columns:1fr; }
-  .toolbar { flex-direction:column; align-items:stretch; gap:12px; }
-  .toolbar-left { width:100%; display:flex; align-items:center; gap:8px; }
-  .search-wrap { flex:1; max-width:none; min-width:0; }
-  .btn-filter { flex-shrink:0; }
-  .btn-clear { display:none; }
-  .toolbar-right { width:100%; display:flex; justify-content:space-between; align-items:center; gap:8px; }
-  .btn-add, .btn-import, .btn-template { flex:1; justify-content:center; }
-  .toast { right:14px; bottom:14px; max-width:calc(100vw - 28px); }
+  .toolbar { flex-direction:column; align-items:stretch; gap:10px; }
+  .toolbar-left { flex-wrap:wrap; width:100%; gap:8px; }
+  .toolbar-left .search-wrap { max-width:100%; min-width:0; width:100%; order:-1; }
+  .btn-filter, .btn-clear { flex:1; justify-content:center; }
+  .toolbar-right { flex-wrap:wrap; gap:6px; width:100%; }
+  .btn-template, .btn-import { flex:1; justify-content:center; }
+  .btn-add { width:100%; justify-content:center; padding:12px 20px; }
+  .filter-panel.open { padding:14px; }
+  .filter-panel-inner { flex-direction:column; gap:10px; }
+  .filter-panel .form-group { min-width:0; width:100%; }
+  .btn-apply { width:100%; }
+  .form-row { grid-template-columns:1fr; gap:0; }
+  .check-grid { grid-template-columns:1fr 1fr; gap:8px; }
+  .modal { max-height:85vh; width:95%; }
+  .modal-body { max-height:60vh; }
+  .btn-save, .btn-cancel { flex:1; text-align:center; justify-content:center; }
+  .confirm-btns { flex-direction:column; }
+  .btn-confirm-del, .btn-confirm-cancel { width:100%; }
+  .toast { right:12px; bottom:12px; left:12px; min-width:0; }
+  .table-footer { flex-direction:column; text-align:center; }
+  .pg-nav { justify-content:center; }
 }
 @media(max-width:480px){
-  .navbar { padding:0 14px; height:54px; }
-  :root { --nb-h:54px; }
-  .main { padding:14px 12px 40px; }
-  .page-title h1 { font-size:18px; }
+  :root { --nb-h: 52px; }
+  .navbar { padding:0 10px; }
+  .nblogo { font-size:17px; }
+  .main { padding:12px 8px 40px; }
+  .page-title h1 { font-size:17px; }
+  .search-input { font-size:16px; }
+  .form-control { font-size:16px; }
+  table { min-width:780px; }
+  .check-grid { grid-template-columns:1fr; }
 }
 </style>
 </head>
@@ -597,22 +717,20 @@ textarea.form-control { resize:vertical; min-height:90px; }
 
 <!-- ══════════ NAVBAR ══════════ -->
 <nav class="navbar">
-  <div style="display:flex;align-items:center;gap:10px;">
+  <div style="display:flex;align-items:center;gap:10px">
     <button class="ham" id="hamBtn" onclick="toggleSidebar()" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
-     <span class="navbar-logo">TestiFy</span>
+    <span class="nblogo">TestiFy</span>
   </div>
-  <div class="navbar-right">
-    <div class="navbar-username">
-      <span><?php
-        $n = htmlspecialchars($_SESSION['name'] ?? $_SESSION['user'] ?? 'Guest');
-        $r = htmlspecialchars(ucfirst($_SESSION['role'] ?? ''));
-        echo $n;
-      ?></span>
-      <?php if ($r): ?><span class="nb-role"><?= $r ?></span><?php endif; ?>
+  <div class="nb-right">
+    <div class="nb-user">
+      <span><?= htmlspecialchars($current_user_name ?: 'Guest') ?></span>
+      <?php if($current_user_role): ?>
+        <span class="nb-role"><?= htmlspecialchars(ucfirst($current_user_role)) ?></span>
+      <?php endif; ?>
     </div>
-    <a href="../logout.php" class="btn-logout">Logout</a>
+    <a href="../logout.php" class="blgout">Logout</a>
   </div>
 </nav>
 
@@ -623,24 +741,26 @@ textarea.form-control { resize:vertical; min-height:90px; }
 <aside class="sidebar" id="sidebar">
   <a href="../dash/user_dash.php" class="sb-home">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-    Home 
+    Home
   </a>
-  <a href="../page/project.php" class="sb-link">
+  <div class="sb-section">Pages</div>
+  <a href="../user_page/u_project.php" class="sb-link">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-    Projects
+    My Projects
   </a>
-  <a href="../page/requirement.php" class="sb-link active">
+  <a href="../user_page/u_requirement.php" class="sb-link active">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
     Requirements
   </a>
-  <a href="../page/test_plans.php" class="sb-link">
-    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+  <a href="../user_page/u_test_plans.php" class="sb-link">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
     Test Plans
   </a>
-  <a href="../page/test_cases.php" class="sb-link">
-    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+  <a href="../user_page/u_test_cases.php" class="sb-link">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
     Test Cases
-  <a href="../page/project_reports.php" class="sb-link">
+  </a>
+  <a href="../user_page/u_project_reports.php" class="sb-link">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
     Reports
   </a>
@@ -650,9 +770,16 @@ textarea.form-control { resize:vertical; min-height:90px; }
 <div class="page-wrap" id="pageWrap">
 <div class="main">
   <div class="page-title">
-    <h1>Project Requirements</h1>
-    <span class="badge-page">Management</span>
+    <h1>My Requirements</h1>
+    <span class="badge-page">Board</span>
   </div>
+
+  <?php if ($is_qa): ?>
+  <div class="qa-notice">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <span>You are QA — You can only view requirements. Add/Edit/Delete access is available only for Developers.</span>
+  </div>
+  <?php endif; ?>
 
   <!-- TOOLBAR -->
   <div class="toolbar">
@@ -669,8 +796,8 @@ textarea.form-control { resize:vertical; min-height:90px; }
                  oninput="autoSearch(this)" autocomplete="off"/>
         </div>
       </form>
-      <button class="btn-filter" onclick="toggleFilter()">
-        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:14px;height:14px;"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+      <button class="btn-filter" onclick="toggleFilter()" id="filterBtn">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
         Filter
       </button>
       <?php if ($filters_applied): ?>
@@ -680,26 +807,37 @@ textarea.form-control { resize:vertical; min-height:90px; }
         </a>
       <?php endif; ?>
     </div>
+    <?php if ($is_developer): ?>
     <div class="toolbar-right">
       <button class="btn-template" onclick="downloadTemplate()">
-        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:14px;height:14px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Template
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Template</span>
       </button>
       <button class="btn-import" onclick="openImportModal()">
-        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:14px;height:14px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Import
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span>Import</span>
       </button>
       <button class="btn-add" onclick="openAddModal()">
         <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Add Requirement
       </button>
     </div>
+    <?php endif; ?>
   </div>
 
   <!-- FILTER PANEL -->
-  <div class="filter-panel <?= $filters_applied ? 'open' : '' ?>" id="filterPanel">
-    <form method="GET" action="">
-      <?php if ($search): ?><input type="hidden" name="search" value="<?= htmlspecialchars($search) ?>"/><?php endif; ?>
+  <div class="filter-panel" id="filterPanel">
+    <div class="filter-panel-header">
+      <span class="filter-panel-title">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        <?php if ($filters_applied): ?><span class="filter-active-dot"></span><?php endif; ?>
+      </span>
+      <button type="button" class="filter-close-btn" onclick="closeFilter()" aria-label="Close filters">
+        <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form method="GET" action="" id="filterForm">
       <div class="filter-panel-inner">
         <div class="form-group">
           <label>Project</label>
@@ -752,13 +890,13 @@ textarea.form-control { resize:vertical; min-height:90px; }
             <th>Exp. Delivery</th>
             <th>Act. Delivery</th>
             <th>Flags</th>
-            <th>Actions</th>
+            <?php if ($is_developer): ?><th>Actions</th><?php endif; ?>
           </tr>
         </thead>
         <tbody id="reqTbody">
           <?php if (!$filters_applied): ?>
           <tr>
-            <td colspan="10">
+            <td colspan="<?= $is_developer ? 10 : 9 ?>">
               <div class="empty-state">
                 <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                 <p>Apply Filters to View Requirements</p>
@@ -768,7 +906,7 @@ textarea.form-control { resize:vertical; min-height:90px; }
           </tr>
           <?php elseif (empty($requirements)): ?>
           <tr>
-            <td colspan="10">
+            <td colspan="<?= $is_developer ? 10 : 9 ?>">
               <div class="empty-state">
                 <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                 <p>No Requirements Found</p>
@@ -805,18 +943,20 @@ textarea.form-control { resize:vertical; min-height:90px; }
                   <span class="flag <?= $r['bug_fixed']     ? 'yes' : 'no' ?>">Fixed</span>
                 </div>
               </td>
+              <?php if ($is_developer): ?>
               <td>
                 <div class="action-btns">
                   <button class="btn-icon edit" title="Edit"
                     onclick='openEditModal(<?= htmlspecialchars(json_encode($r), ENT_QUOTES) ?>)'>
                     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>
-                  <button class="btn-icon del" title="Delete"
+                  <!-- <button class="btn-icon del" title="Delete"
                     onclick="openConfirm(<?= $r['id'] ?>, '<?= addslashes(htmlspecialchars($r['title'])) ?>')">
                     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                  </button>
+                  </button> -->
                 </div>
               </td>
+              <?php endif; ?>
             </tr>
             <?php endforeach; ?>
           <?php endif; ?>
@@ -841,7 +981,7 @@ textarea.form-control { resize:vertical; min-height:90px; }
           'search'          => $search,
         ]));
       ?>
-      <div class="pagination">
+      <div class="pg-nav">
         <a href="?page=<?= max(1,$page-1) ?>&<?= $qs ?>" class="pg-btn <?= $page <= 1 ? 'disabled' : '' ?>">
           <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" style="width:13px;height:13px;"><polyline points="15 18 9 12 15 6"/></svg>
         </a>
@@ -860,8 +1000,9 @@ textarea.form-control { resize:vertical; min-height:90px; }
     </div>
   </div>
 </div>
-</div><!-- end .page-wrap -->
+</div>
 
+<?php if ($is_developer): ?>
 <!-- ═══════════════ ADD MODAL ═══════════════ -->
 <div class="modal-overlay" id="addModal">
   <div class="modal">
@@ -890,7 +1031,7 @@ textarea.form-control { resize:vertical; min-height:90px; }
         <div class="form-group">
           <label>Requirement Description <span>*</span></label>
           <textarea name="description" id="addDesc" class="form-control" placeholder="Describe the requirement..."></textarea>
-          <div id="descError" style="color:var(--red);font-size:12px;margin-top:4px;display:none;">Description required hai.</div>
+          <div id="descError" style="color:var(--red);font-size:12px;margin-top:4px;display:none;">Description is required.</div>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -1045,18 +1186,19 @@ textarea.form-control { resize:vertical; min-height:90px; }
           <div style="font-size:11.5px;color:var(--text-muted);margin-top:5px;">If CSV doesn't contain a project name, this project will be used.</div>
         </div>
         <div class="form-group">
-          <label>CSV File Upload Karein <span>*</span></label>
+          <label>Upload CSV File <span>*</span></label>
           <div id="dropZone" onclick="document.getElementById('csvFileInput').click()"
                style="border:2px dashed var(--border);border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:#fafcff;">
             <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" style="width:36px;height:36px;color:#b0bdd6;margin-bottom:10px;">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
-            <div id="dropLabel" style="font-size:13.5px;font-weight:700;color:var(--text-muted);">Click karein ya CSV file drag karein</div>
-            <div style="font-size:11.5px;color:#b0bdd6;margin-top:4px;">Sirf .csv files allowed hain</div>
+            <div id="dropLabel" style="font-size:13.5px;font-weight:700;color:var(--text-muted);">Click or drag CSV file here</div>
+            <div style="font-size:11.5px;color:#b0bdd6;margin-top:4px;">Only .csv files are allowed</div>
           </div>
           <input type="file" name="csv_file" id="csvFileInput" accept=".csv" style="display:none;" onchange="onFileSelect(this)"/>
         </div>
-        <div style="background:#f8faff;border:1.5px solid var(--border);border-radius:10px;padding:14px 16px;">
+        <div style="background:linear-gradient(135deg,#f8faff,#f0f4ff);border:1.5px solid var(--border);border-radius:10px;padding:14px 16px;position:relative;">
+          <div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid));border-radius:10px 10px 0 0;"></div>
           <div style="font-size:11.5px;font-weight:700;color:var(--text-muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px;">CSV Format Guide</div>
           <div style="font-size:12px;color:var(--text-main);line-height:1.8;">
             <strong>Required columns:</strong> project_name, title<br>
@@ -1066,16 +1208,16 @@ textarea.form-control { resize:vertical; min-height:90px; }
             <strong>Date format:</strong> YYYY-MM-DD &nbsp;|&nbsp; <strong>Flag values:</strong> 0 or 1
           </div>
           <button type="button" onclick="downloadTemplate()"
-                  style="margin-top:10px;padding:6px 14px;border-radius:8px;border:1.5px solid var(--blue-mid);background:transparent;color:var(--blue-mid);font-family:'Nunito',sans-serif;font-weight:700;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">
+                  style="margin-top:10px;padding:6px 14px;border-radius:8px;border:1.5px solid var(--blue-mid);background:transparent;color:var(--blue-mid);font-family:'Nunito',sans-serif; font-weight:700;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:background .15s,color .15s;">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:13px;height:13px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Sample Template Download Karein
+            Download Sample Template
           </button>
         </div>
       </div>
     </form>
     <div class="modal-footer">
       <button type="button" class="btn-cancel" onclick="closeModal('importModal')">Cancel</button>
-      <button type="submit" form="importForm" class="btn-save">Import Karein</button>
+      <button type="submit" form="importForm" class="btn-save">Import</button>
     </div>
   </div>
 </div>
@@ -1083,14 +1225,15 @@ textarea.form-control { resize:vertical; min-height:90px; }
 <!-- CONFIRM DELETE -->
 <div class="confirm-overlay" id="confirmOverlay">
   <div class="confirm-box">
-    <h3>Requirement Delete Karein?</h3>
+    <h3>Delete Requirement?</h3>
     <p id="confirmMsg">Are you sure?</p>
     <div class="confirm-btns">
-      <button class="btn-confirm-del" onclick="confirmDelete()">Haan, Delete Karo</button>
+      <button class="btn-confirm-del" onclick="confirmDelete()">Yes, Delete</button>
       <button class="btn-confirm-cancel" onclick="closeConfirm()">Cancel</button>
     </div>
   </div>
 </div>
+<?php endif; /* end is_developer for modals */ ?>
 
 <!-- TOAST -->
 <?php if ($msg): ?>
@@ -1110,11 +1253,35 @@ textarea.form-control { resize:vertical; min-height:90px; }
 </script>
 <?php endif; ?>
 
-<?php if ($edit_req): ?>
-<script>document.addEventListener('DOMContentLoaded',function(){ openEditModal(<?= json_encode($edit_req) ?>); });</script>
+<?php if ($edit_req && $is_developer): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  document.body.style.overflow = '';
+  openEditModal(<?= json_encode($edit_req) ?>);
+});
+</script>
 <?php endif; ?>
 
 <script>
+// ── Safety: Clear stuck overlays on page load ──
+document.addEventListener('DOMContentLoaded', function(){
+  document.body.style.overflow = '';
+  document.querySelectorAll('.modal-overlay.open, .confirm-overlay.open, .sidebar-overlay.open').forEach(function(el){
+    el.classList.remove('open');
+  });
+  document.querySelectorAll('.sidebar.open, .ham.open').forEach(function(el){
+    el.classList.remove('open');
+  });
+  // Clean URL params
+  var cleanParams = ['added','updated','deleted','add_err','edit_err','import_err','imported','imp_err','edit','no_access'];
+  var url = new URL(window.location.href);
+  var changed = false;
+  cleanParams.forEach(function(k){ if(url.searchParams.has(k)){ url.searchParams.delete(k); changed = true; } });
+  if (changed) {
+    window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+  }
+});
+
 // ── Sidebar ──
 function toggleSidebar(){
   var sb = document.getElementById('sidebar');
@@ -1133,6 +1300,7 @@ function closeSidebar(){
 }
 window.addEventListener('resize', function(){ if(window.innerWidth > 768) closeSidebar(); });
 
+<?php if ($is_developer): ?>
 // ── Form Validation ──
 function validateAddForm(){
   var proj  = document.querySelector('#addModal [name="project_id"]').value;
@@ -1140,19 +1308,29 @@ function validateAddForm(){
   var desc  = document.getElementById('addDesc').value.trim();
   var pri   = document.querySelector('#addModal [name="priority"]').value;
   var err   = document.getElementById('descError');
-  if(!proj){   alert('Project select karo.');   return false; }
-  if(!title){  alert('Title enter karo.');       return false; }
+  if(!proj){   alert('Please select a project.');   return false; }
+  if(!title){  alert('Please enter a title.');       return false; }
   if(!desc){
     err.style.display = 'block';
     document.getElementById('addDesc').focus();
     return false;
   } else { err.style.display = 'none'; }
-  if(!pri){    alert('Priority select karo.');   return false; }
+  if(!pri){    alert('Please select a priority.');   return false; }
   return true;
 }
 
 // ── Filter Panel ──
-function toggleFilter(){ document.getElementById('filterPanel').classList.toggle('open'); }
+var _filterOpen = false;
+function toggleFilter(){
+  var panel = document.getElementById('filterPanel');
+  _filterOpen = !_filterOpen;
+  if(_filterOpen){ panel.classList.add('open'); } else { panel.classList.remove('open'); }
+}
+function closeFilter(){
+  var panel = document.getElementById('filterPanel');
+  panel.classList.remove('open');
+  _filterOpen = false;
+}
 
 // ── Auto Search ──
 var _st = null;
@@ -1162,10 +1340,21 @@ function autoSearch(inp){
 }
 
 // ── Modals ──
-function openAddModal(){ document.getElementById('addModal').classList.add('open'); document.body.style.overflow='hidden'; }
-function closeModal(id){ document.getElementById(id).classList.remove('open'); document.body.style.overflow=''; }
+function openAddModal(){
+  document.getElementById('addModal').classList.add('open');
+  document.body.style.overflow='hidden';
+  var modalBody = document.querySelector('#addModal .modal-body');
+  if(modalBody) modalBody.scrollTop = 0;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function closeModal(id){
+  document.getElementById(id).classList.remove('open');
+  document.body.style.overflow='';
+  window.scrollTo({top:0,behavior:'smooth'});
+}
 ['addModal','editModal','importModal'].forEach(function(id){
-  document.getElementById(id).addEventListener('click',function(e){ if(e.target===this) closeModal(id); });
+  var el = document.getElementById(id);
+  if(el) el.addEventListener('click',function(e){ if(e.target===this) closeModal(id); });
 });
 
 function openEditModal(r){
@@ -1186,17 +1375,24 @@ function openEditModal(r){
   document.getElementById('eBugFixed').checked = r.bug_fixed     == 1;
   document.getElementById('editModal').classList.add('open');
   document.body.style.overflow='hidden';
+  var modalBody = document.querySelector('#editModal .modal-body');
+  if(modalBody) modalBody.scrollTop = 0;
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 
 // ── Confirm Delete ──
 var _delId = null;
 function openConfirm(id, title){
   _delId = id;
-  document.getElementById('confirmMsg').textContent = '"' + title + '" ko permanently delete karna chahte hain?';
+  document.getElementById('confirmMsg').textContent = 'Are you sure you want to permanently delete "' + title + '"?';
   document.getElementById('confirmOverlay').classList.add('open');
   document.body.style.overflow='hidden';
 }
-function closeConfirm(){ document.getElementById('confirmOverlay').classList.remove('open'); document.body.style.overflow=''; _delId=null; }
+function closeConfirm(){
+  document.getElementById('confirmOverlay').classList.remove('open');
+  document.body.style.overflow='';
+  _delId=null;
+}
 function confirmDelete(){
   if(!_delId) return;
   fetch('?delete='+_delId+'&ajax=1',{method:'GET'})
@@ -1206,25 +1402,12 @@ function confirmDelete(){
         var row = document.getElementById('row-'+_delId);
         if(row) row.remove();
         closeConfirm();
-        showToast('Requirement delete ho gaya.','success');
-      } else { showToast('Delete nahi hua.','error'); }
+        showToast('Requirement deleted successfully.','success');
+      } else { showToast('Failed to delete.','error'); }
     }).catch(function(){ showToast('Network error.','error'); });
 }
-document.getElementById('confirmOverlay').addEventListener('click',function(e){ if(e.target===this) closeConfirm(); });
-
-// ── Toast ──
-function showToast(msg, type){
-  var old = document.getElementById('liveToast');
-  if(old) old.remove();
-  var t = document.createElement('div');
-  t.className = 'toast '+type; t.id = 'liveToast';
-  var icon = type === 'success'
-    ? '<svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>'
-    : '<svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-  t.innerHTML = icon + msg;
-  document.body.appendChild(t);
-  setTimeout(function(){ t.classList.add('toast-hide'); setTimeout(function(){ t.remove(); },300); },4000);
-}
+var confirmEl = document.getElementById('confirmOverlay');
+if(confirmEl) confirmEl.addEventListener('click',function(e){ if(e.target===this) closeConfirm(); });
 
 // ── Download Template ──
 function downloadTemplate(){
@@ -1241,6 +1424,9 @@ function downloadTemplate(){
 function openImportModal(){
   document.getElementById('importModal').classList.add('open');
   document.body.style.overflow = 'hidden';
+  var modalBody = document.querySelector('#importModal .modal-body');
+  if(modalBody) modalBody.scrollTop = 0;
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 function onFileSelect(input){
   var file  = input.files[0];
@@ -1252,7 +1438,7 @@ function onFileSelect(input){
     zone.style.borderColor = 'var(--green)';
     zone.style.background  = '#f0fdf4';
   } else {
-    label.textContent = 'Click karein ya CSV file drag karein';
+    label.textContent = 'Click or drag CSV file here';
     label.style.color = 'var(--text-muted)';
     zone.style.borderColor = 'var(--border)';
     zone.style.background  = '#fafcff';
@@ -1266,8 +1452,8 @@ document.addEventListener('DOMContentLoaded', function(){
   if(!zone) return;
   zone.addEventListener('dragover', function(e){
     e.preventDefault();
-    zone.style.borderColor = 'var(--blue-mid)';
-    zone.style.background  = '#eef4fd';
+    zone.style.borderColor = 'var(--purple-mid)';
+    zone.style.background  = '#f3e8ff';
   });
   zone.addEventListener('dragleave', function(){
     zone.style.borderColor = 'var(--border)';
@@ -1282,12 +1468,27 @@ document.addEventListener('DOMContentLoaded', function(){
       input.files = dt.files;
       onFileSelect(input);
     } else {
-      showToast('Sirf .csv file allowed hai.', 'error');
+      showToast('Only .csv files are allowed.', 'error');
       zone.style.borderColor = 'var(--border)';
       zone.style.background  = '#fafcff';
     }
   });
 });
+<?php endif; /* end is_developer for JS */ ?>
+
+// ── Toast (shared) ──
+function showToast(msg, type){
+  var old = document.getElementById('liveToast');
+  if(old) old.remove();
+  var t = document.createElement('div');
+  t.className = 'toast '+type; t.id = 'liveToast';
+  var icon = type === 'success'
+    ? '<svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>'
+    : '<svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+  t.innerHTML = icon + msg;
+  document.body.appendChild(t);
+  setTimeout(function(){ t.classList.add('toast-hide'); setTimeout(function(){ t.remove(); },300); },4000);
+}
 </script>
 </body>
 </html>

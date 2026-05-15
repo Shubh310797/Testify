@@ -329,6 +329,7 @@ function status_label(string $s): string {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover"/>
 <title>TestiFy — Requirements</title>
+<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <style>
 /* ═══════════════════════════════════════════════════════════════
@@ -822,7 +823,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
 <div class="main">
   <div class="page-title">
     <h1>Project Requirements</h1>
-    <span class="badge-page">Management</span>
+    <span class="badge-page">Board</span>
   </div>
 
   <!-- TOOLBAR -->
