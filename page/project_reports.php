@@ -23,116 +23,333 @@ function get_cols(mysqli $db, string $table): array {
     return $cols;
 }
 
+// CASE-INSENSITIVE pick — matches column names regardless of camelCase / snake_case
 function pick(array $cols, array $candidates, ?string $fallback = null): ?string {
-    foreach ($candidates as $c) if (in_array($c, $cols)) return $c;
+    $cols_lower = array_map('strtolower', $cols);
+    foreach ($candidates as $c) {
+        $idx = array_search(strtolower($c), $cols_lower, true);
+        if ($idx !== false) return $cols[$idx];
+    }
     return $fallback;
 }
 
+// Robust MySQL boolean check — handles 0/1, '0'/'1', true/false, NULL
+function isTruthy($val): bool {
+    if ($val === null || $val === false) return false;
+    if (is_int($val) || is_float($val)) return $val != 0;
+    if (is_string($val)) {
+        $v = strtolower(trim($val));
+        return !in_array($v, ['', '0', 'no', 'false', 'off', 'null'], true);
+    }
+    return !empty($val);
+}
+
 // ══════════════════════════════════════════════════════
-//  HELPER: Get Project Team (Developers & QA Members)
+//  HELPER: Classify a user role as 'dev', 'qa', or 'admin'
+//  ── Returns 'admin' so we can EXCLUDE admins from lists
+// ══════════════════════════════════════════════════════
+function classifyRole(string $role): ?string {
+    $r = strtolower(trim($role));
+    // Admin roles — these will be EXCLUDED from Developers & QA Members
+    if (in_array($r, ['admin', 'administrator', 'superadmin', 'super admin',
+                       'super_admin', 'sysadmin', 'system admin'])) {
+        return 'admin';
+    }
+    if (in_array($r, ['qa', 'tester', 'quality', 'qa engineer', 'test engineer',
+                       'quality assurance', 'qa tester', 'qa lead', 'test lead',
+                       'testing', 'test analyst', 'qa analyst',
+                       'senior qa', 'sr. qa', 'qa manager',
+                       'lead qa', 'qa team lead'])) {
+        return 'qa';
+    }
+    if (in_array($r, ['developer', 'dev', 'developers', 'development',
+                       'software engineer', 'programmer', 'full stack developer',
+                       'frontend developer', 'backend developer', 'sr. developer',
+                       'jr. developer', 'lead developer',
+                       'tech lead', 'project lead',
+                       'dev lead', 'development lead',
+                       'technical lead', 'tech lead / developer'])) {
+        return 'dev';
+    }
+    // NOTE: 'lead', 'manager' → pure management roles — excluded from Developers
+    if (in_array($r, ['lead', 'manager'])) {
+        return 'lead';
+    }
+    return null; // unknown role — skip
+}
+
+// ══════════════════════════════════════════════════════
+//  HELPER: Add user to developers/qa arrays with filtering
+//  ── Skips admin, lead (pure manager) roles
+//  ── 'project lead', 'tech lead' → classified as 'dev' (they also develop)
+//  ── 'qa lead', 'test lead' → classified as 'qa' (they also test)
+// ══════════════════════════════════════════════════════
+function addTeamMember(array &$developers, array &$qa_members, string $uname, string $urole): void {
+    $classified = classifyRole($urole);
+    // Skip admins and pure management roles (lead/manager only)
+    if ($classified === 'admin' || $classified === 'lead') return;
+    if ($classified === 'qa') {
+        $qa_members[$uname] = true;
+    } elseif ($classified === 'dev') {
+        $developers[$uname] = true;
+    }
+    // null = unknown role → skip
+}
+
+// ══════════════════════════════════════════════════════
+//  HELPER: Get Project Team (ALL Developers & QA Members)
+//  ── Combines ALL strategies to find every team member
 // ══════════════════════════════════════════════════════
 function getProjectTeam(mysqli $conn, int $project_id): array {
-    $developers = [];
-    $qa_members = [];
+    $developers = [];  // name => true  (using keys for dedup)
+    $qa_members = [];  // name => true
+
+    // Track QA Lead & Project Lead IDs to EXCLUDE from team lists
+    // (they already appear in QA Lead / Project Lead columns)
+    $qa_lead_uid    = null;
+    $proj_lead_uid  = null;
+    $exclude_names  = [];  // names to exclude from final lists
 
     $user_cols = get_cols($conn, 'users');
     $role_col  = pick($user_cols, ['role', 'user_role', 'user_type', 'type'], 'role');
     $name_col  = pick($user_cols, ['name', 'full_name', 'username', 'display_name'], 'name');
 
-    // ── Strategy 1: Check for junction tables (project_members, project_users, etc.) ──
-    $junction_tables = ['project_members', 'project_users', 'project_team', 'team_members', 'project_assignments'];
-    $junction_found  = null;
-    $junction_proj_fk = null;
-    $junction_user_fk = null;
+    if (!$name_col || !$role_col) {
+        return ['developers' => 'N/A', 'qa_members' => 'N/A'];
+    }
+
+    // ══════════════════════════════════════════════════
+    //  STRATEGY 0: Projects table (qa_id, project_lead_id, created_by)
+    // ══════════════════════════════════════════════════
+    $proj_cols = get_cols($conn, 'projects');
+    $proj_qa_col     = pick($proj_cols, ['qa_id', 'qa_lead_id', 'qa_lead', 'qa_manager_id', 'tester_lead_id']);
+    $proj_lead_col   = pick($proj_cols, ['project_lead_id', 'lead_id', 'manager_id']);
+    $proj_created_by = pick($proj_cols, ['created_by', 'created_by_id', 'author_id']);
+
+    if ($proj_qa_col || $proj_lead_col) {
+        $proj_sel_parts = [];
+        if ($proj_qa_col)     $proj_sel_parts[] = "`$proj_qa_col` AS qa_user_id";
+        if ($proj_lead_col)   $proj_sel_parts[] = "`$proj_lead_col` AS lead_user_id";
+        if ($proj_created_by) $proj_sel_parts[] = "`$proj_created_by` AS created_user_id";
+        $proj_sel_sql = implode(', ', $proj_sel_parts);
+        $p_res = $conn->query("SELECT $proj_sel_sql FROM projects WHERE id = $project_id");
+        if ($p_res && ($p_row = $p_res->fetch_assoc())) {
+            $user_ids = [];
+            $qa_uid     = $p_row['qa_user_id'] ?? null;
+            $lead_uid   = $p_row['lead_user_id'] ?? null;
+            $created_uid = $p_row['created_user_id'] ?? null;
+
+            // Track QA Lead & Project Lead user IDs for exclusion from lists
+            if ($qa_uid && $qa_uid != 0)       { $qa_lead_uid   = $qa_uid; }
+            if ($lead_uid && $lead_uid != 0)    { $proj_lead_uid = $lead_uid; }
+
+            // qa_id → skip from lists (shown in QA Lead column)
+            // project_lead_id → skip from lists (shown in Project Lead column)
+            // created_by → add as dev (if not qa_lead or proj_lead)
+            if ($created_uid && $created_uid != 0
+                && $created_uid != $qa_uid && $created_uid != $lead_uid) {
+                $user_ids[$created_uid] = 'dev';
+            }
+
+            if (!empty($user_ids)) {
+                $uid_list = implode(',', array_keys($user_ids));
+                $u_res = $conn->query("SELECT id, `$name_col` AS uname, `$role_col` AS urole FROM users WHERE id IN ($uid_list)");
+                if ($u_res) while ($u = $u_res->fetch_assoc()) {
+                    // Skip QA Lead & Project Lead (already in their own columns)
+                    if ($u['id'] == $qa_lead_uid || $u['id'] == $proj_lead_uid) continue;
+                    // Use addTeamMember which handles admin/qa_lead/lead filtering
+                    addTeamMember($developers, $qa_members, $u['uname'], $u['urole'] ?? '');
+                }
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════
+    //  STRATEGY 1: Junction tables (project_members, etc.)
+    //  ── Check BOTH junction table's role col AND users table role
+    // ══════════════════════════════════════════════════
+    $junction_tables = ['project_members', 'project_users', 'project_team',
+                        'team_members', 'project_assignments',
+                        'project_developers', 'project_qa'];
 
     foreach ($junction_tables as $jt) {
         $check = $conn->query("SHOW TABLES LIKE '$jt'");
-        if ($check && $check->num_rows > 0) {
-            $jt_cols = get_cols($conn, $jt);
-            $jp = pick($jt_cols, ['project_id', 'proj_id', 'project'], 'project_id');
-            $ju = pick($jt_cols, ['user_id', 'member_id', 'users_id', 'uid'], 'user_id');
-            if ($jp && $ju) {
-                $junction_found   = $jt;
-                $junction_proj_fk = $jp;
-                $junction_user_fk = $ju;
-                break;
+        if (!$check || $check->num_rows == 0) continue;
+
+        $jt_cols = get_cols($conn, $jt);
+        $jp = pick($jt_cols, ['project_id', 'proj_id', 'project'], 'project_id');
+        $ju = pick($jt_cols, ['user_id', 'member_id', 'users_id', 'uid'], 'user_id');
+        if (!$jp || !$ju) continue;
+
+        // Check if junction table has its own role/type column
+        $jt_role_col = pick($jt_cols, ['role', 'member_role', 'user_role', 'type', 'member_type', 'assignment_type']);
+
+        if ($jt_role_col) {
+            // ── Junction table has role column — use it directly ──
+            $sql = "SELECT DISTINCT u.`$name_col` AS uname, u.`$role_col` AS urole, pm.`$jt_role_col` AS jt_role
+                    FROM `$jt` pm
+                    JOIN users u ON pm.`$ju` = u.id
+                    WHERE pm.`$jp` = $project_id";
+            $res = $conn->query($sql);
+            if ($res) while ($row = $res->fetch_assoc()) {
+                // First try junction table role, then users table role
+                $jt_classified = classifyRole($row['jt_role'] ?? '');
+                $u_classified  = classifyRole($row['urole'] ?? '');
+                $use_role = ($jt_classified !== null) ? $row['jt_role'] : $row['urole'];
+                addTeamMember($developers, $qa_members, $row['uname'], $use_role ?? '');
+            }
+        } else {
+            // ── No role column in junction — rely on users table role ──
+            $sql = "SELECT DISTINCT u.`$name_col` AS uname, u.`$role_col` AS urole
+                    FROM `$jt` pm
+                    JOIN users u ON pm.`$ju` = u.id
+                    WHERE pm.`$jp` = $project_id";
+            $res = $conn->query($sql);
+            if ($res) while ($row = $res->fetch_assoc()) {
+                addTeamMember($developers, $qa_members, $row['uname'], $row['urole'] ?? '');
             }
         }
     }
 
-    if ($junction_found && $role_col) {
-        // Use junction table to find team members
-        $sql = "SELECT DISTINCT u.`$name_col` AS uname, u.`$role_col` AS urole
-                FROM `$junction_found` pm
-                JOIN users u ON pm.`$junction_user_fk` = u.id
-                WHERE pm.`$junction_proj_fk` = $project_id";
+    // ══════════════════════════════════════════════════
+    //  STRATEGY 2: Users table with project_id directly
+    //  ── Some schemas store project_id in users table
+    // ══════════════════════════════════════════════════
+    $user_proj_col = pick($user_cols, ['project_id', 'proj_id', 'project']);
+    if ($user_proj_col) {
+        $sql = "SELECT `$name_col` AS uname, `$role_col` AS urole FROM users WHERE `$user_proj_col` = $project_id";
         $res = $conn->query($sql);
         if ($res) while ($row = $res->fetch_assoc()) {
-            $role = strtolower(trim($row['urole'] ?? ''));
-            if (in_array($role, ['developer', 'dev', 'developers', 'development'])) {
-                $developers[] = $row['uname'];
-            } elseif (in_array($role, ['qa', 'tester', 'quality', 'qa engineer', 'test engineer', 'quality assurance', 'qa tester'])) {
-                $qa_members[] = $row['uname'];
-            }
+            addTeamMember($developers, $qa_members, $row['uname'], $row['urole'] ?? '');
         }
     }
 
-    // ── Strategy 2: If no junction table or no results, derive from test_cases & requirements ──
-    if (empty($developers) && empty($qa_members) && $role_col) {
-        // Collect unique user IDs from test_cases for this project
-        $tc_cols = get_cols($conn, 'test_cases');
-        $tc_user_cols = [];
-        $c1 = pick($tc_cols, ['created_by', 'created_by_id', 'author_id', 'added_by']);
-        $c2 = pick($tc_cols, ['executed_by', 'executed_by_id', 'tester_id', 'tester']);
-        $c3 = pick($tc_cols, ['assigned_to', 'assigned_to_id', 'assignee_id', 'assignee']);
-        if ($c1) $tc_user_cols[] = $c1;
-        if ($c2) $tc_user_cols[] = $c2;
-        if ($c3) $tc_user_cols[] = $c3;
+    // ══════════════════════════════════════════════════
+    //  STRATEGY 3: From test_cases — users who created/executed/assigned
+    // ══════════════════════════════════════════════════
+    $tc_cols = get_cols($conn, 'test_cases');
+    $tc_user_cols = [];
+    $c1 = pick($tc_cols, ['created_by', 'created_by_id', 'author_id', 'added_by']);
+    $c2 = pick($tc_cols, ['executed_by', 'executed_by_id', 'tester_id', 'tester']);
+    $c3 = pick($tc_cols, ['assigned_to', 'assigned_to_id', 'assignee_id', 'assignee']);
+    if ($c1) $tc_user_cols[] = $c1;
+    if ($c2) $tc_user_cols[] = $c2;
+    if ($c3) $tc_user_cols[] = $c3;
 
-        if (!empty($tc_user_cols)) {
-            $user_id_selects = [];
-            foreach ($tc_user_cols as $uc) {
-                $user_id_selects[] = "SELECT DISTINCT `$uc` AS uid FROM test_cases WHERE project_id = $project_id AND `$uc` IS NOT NULL AND `$uc` != 0";
-            }
-            $union_sql = implode(' UNION ', $user_id_selects);
-            $sql = "SELECT u.`$name_col` AS uname, u.`$role_col` AS urole
-                    FROM users u WHERE u.id IN ($union_sql)";
-            $res = $conn->query($sql);
-            if ($res) while ($row = $res->fetch_assoc()) {
-                $role = strtolower(trim($row['urole'] ?? ''));
-                if (in_array($role, ['developer', 'dev', 'developers', 'development'])) {
-                    $developers[] = $row['uname'];
-                } elseif (in_array($role, ['qa', 'tester', 'quality', 'qa engineer', 'test engineer', 'quality assurance', 'qa tester'])) {
-                    $qa_members[] = $row['uname'];
-                }
+    if (!empty($tc_user_cols)) {
+        $user_id_selects = [];
+        foreach ($tc_user_cols as $uc) {
+            $user_id_selects[] = "SELECT DISTINCT `$uc` AS uid FROM test_cases WHERE project_id = $project_id AND `$uc` IS NOT NULL AND `$uc` != 0";
+        }
+        $union_sql = implode(' UNION ', $user_id_selects);
+        $sql = "SELECT u.`$name_col` AS uname, u.`$role_col` AS urole
+                FROM users u WHERE u.id IN ($union_sql)";
+        $res = $conn->query($sql);
+        if ($res) while ($row = $res->fetch_assoc()) {
+            addTeamMember($developers, $qa_members, $row['uname'], $row['urole'] ?? '');
+        }
+    }
+
+    // ══════════════════════════════════════════════════
+    //  STRATEGY 4: From requirements — users who created them
+    // ══════════════════════════════════════════════════
+    $req_cols      = get_cols($conn, 'requirements');
+    $req_proj_fk   = pick($req_cols, ['project_id', 'proj_id', 'project']);
+    $req_user_col  = pick($req_cols, ['created_by', 'created_by_id', 'author_id', 'added_by', 'developer_id']);
+    if ($req_proj_fk && $req_user_col) {
+        $sql = "SELECT u.`$name_col` AS uname, u.`$role_col` AS urole
+                FROM users u WHERE u.id IN (
+                    SELECT DISTINCT `$req_user_col` FROM requirements
+                    WHERE `$req_proj_fk` = $project_id AND `$req_user_col` IS NOT NULL AND `$req_user_col` != 0
+                )";
+        $res = $conn->query($sql);
+        if ($res) while ($row = $res->fetch_assoc()) {
+            addTeamMember($developers, $qa_members, $row['uname'], $row['urole'] ?? '');
+        }
+    }
+
+    // ══════════════════════════════════════════════════
+    //  STRATEGY 5: Dynamic junction table scan
+    //  ── Find ANY table that has both project_id and user_id columns
+    // ══════════════════════════════════════════════════
+    $all_tables_res = $conn->query("SHOW TABLES");
+    $already_checked = array_flip($junction_tables);
+    if ($all_tables_res) while ($t_row = $all_tables_res->fetch_array()) {
+        $tname = $t_row[0];
+        // Skip already-checked tables and system tables
+        if (isset($already_checked[$tname])) continue;
+        if (in_array($tname, ['projects', 'users', 'clients', 'requirements',
+                               'test_cases', 'test_plans', 'technologies',
+                               'testing_types', 'migrations', 'sessions'])) continue;
+
+        $t_cols = get_cols($conn, $tname);
+        $t_proj = pick($t_cols, ['project_id', 'proj_id', 'project']);
+        $t_user = pick($t_cols, ['user_id', 'member_id', 'users_id', 'uid']);
+        if (!$t_proj || !$t_user) continue;
+
+        // Found a junction-like table — use it
+        $t_role = pick($t_cols, ['role', 'member_role', 'user_role', 'type', 'member_type']);
+
+        if ($t_role) {
+            $sql = "SELECT DISTINCT u.`$name_col` AS uname, u.`$role_col` AS urole, jt.`$t_role` AS jt_role
+                    FROM `$tname` jt
+                    JOIN users u ON jt.`$t_user` = u.id
+                    WHERE jt.`$t_proj` = $project_id";
+        } else {
+            $sql = "SELECT DISTINCT u.`$name_col` AS uname, u.`$role_col` AS urole
+                    FROM `$tname` jt
+                    JOIN users u ON jt.`$t_user` = u.id
+                    WHERE jt.`$t_proj` = $project_id";
+        }
+        $res = $conn->query($sql);
+        if ($res) while ($row = $res->fetch_assoc()) {
+            $jt_classified = isset($row['jt_role']) ? classifyRole($row['jt_role']) : null;
+            $use_role = ($jt_classified !== null) ? $row['jt_role'] : $row['urole'];
+            addTeamMember($developers, $qa_members, $row['uname'], $use_role ?? '');
+        }
+    }
+
+    // ══════════════════════════════════════════════════
+    //  FINAL FILTER: Smart dual-role handling
+    //  ── QA Lead: if role is 'qa' → show in QA Members too
+    //  ── Project Lead: if role is 'dev' → show in Developers too
+    // ══════════════════════════════════════════════════
+    if ($qa_lead_uid) {
+        $qa_lead_res = $conn->query("SELECT `$name_col` AS uname, `$role_col` AS urole FROM users WHERE id = $qa_lead_uid");
+        if ($qa_lead_res && ($qrow = $qa_lead_res->fetch_assoc())) {
+            $qa_lead_classified = classifyRole($qrow['urole'] ?? '');
+            if ($qa_lead_classified === 'qa') {
+                // QA Lead IS also a QA member → ADD to QA Members
+                $qa_members[$qrow['uname']] = true;
+            } elseif (isset($qa_members[$qrow['uname']])) {
+                // Already in QA Members via junction table / strategy → KEEP them
+            } else {
+                // QA Lead is NOT a QA member → exclude from QA Members
+                $exclude_names[$qrow['uname']] = true;
+                unset($qa_members[$qrow['uname']]);
             }
         }
-
-        // Also find users from requirements
-        $req_cols      = get_cols($conn, 'requirements');
-        $req_proj_fk   = pick($req_cols, ['project_id', 'proj_id', 'project']);
-        $req_user_col  = pick($req_cols, ['created_by', 'created_by_id', 'author_id', 'added_by', 'developer_id']);
-        if ($req_proj_fk && $req_user_col) {
-            $sql = "SELECT u.`$name_col` AS uname, u.`$role_col` AS urole
-                    FROM users u WHERE u.id IN (
-                        SELECT DISTINCT `$req_user_col` FROM requirements
-                        WHERE `$req_proj_fk` = $project_id AND `$req_user_col` IS NOT NULL AND `$req_user_col` != 0
-                    )";
-            $res = $conn->query($sql);
-            if ($res) while ($row = $res->fetch_assoc()) {
-                $role = strtolower(trim($row['urole'] ?? ''));
-                if (in_array($role, ['developer', 'dev', 'developers', 'development'])) {
-                    if (!in_array($row['uname'], $developers)) $developers[] = $row['uname'];
-                } elseif (in_array($role, ['qa', 'tester', 'quality', 'qa engineer', 'test engineer', 'quality assurance', 'qa tester'])) {
-                    if (!in_array($row['uname'], $qa_members)) $qa_members[] = $row['uname'];
-                }
+    }
+    if ($proj_lead_uid) {
+        $lead_res = $conn->query("SELECT `$name_col` AS uname, `$role_col` AS urole FROM users WHERE id = $proj_lead_uid");
+        if ($lead_res && ($lrow = $lead_res->fetch_assoc())) {
+            $lead_classified = classifyRole($lrow['urole'] ?? '');
+            if ($lead_classified === 'dev') {
+                // Project Lead IS also a developer → ADD to Developers
+                $developers[$lrow['uname']] = true;
+            } elseif (isset($developers[$lrow['uname']])) {
+                // Already in Developers via junction table / strategy → KEEP them
+            } else {
+                // Project Lead is NOT a developer → exclude from Developers
+                $exclude_names[$lrow['uname']] = true;
+                unset($developers[$lrow['uname']]);
             }
         }
     }
 
     return [
-        'developers' => implode(', ', $developers) ?: 'N/A',
-        'qa_members' => implode(', ', $qa_members) ?: 'N/A'
+        'developers' => implode(', ', array_keys($developers)) ?: 'N/A',
+        'qa_members' => implode(', ', array_keys($qa_members)) ?: 'N/A'
     ];
 }
 
@@ -146,7 +363,7 @@ function buildSummaryData(mysqli $conn, int $project_id): ?array {
     $tc_cols   = get_cols($conn, 'test_cases');
 
     $proj_lead_col    = pick($proj_cols, ['project_lead_id', 'lead_id', 'manager_id']);
-    $proj_qa_lead_col = pick($proj_cols, ['qa_lead_id', 'qa_lead', 'qa_manager_id', 'tester_lead_id']);
+    $proj_qa_lead_col = pick($proj_cols, ['qa_id', 'qa_lead_id', 'qa_lead', 'qa_manager_id', 'tester_lead_id']);
     $req_name_col     = pick($req_cols,  ['title', 'name', 'requirement_name', 'req_name', 'module_name', 'module'], 'id');
     $req_proj_fk      = pick($req_cols,  ['project_id', 'proj_id', 'project']);
     $req_is_dev_col   = pick($req_cols,  ['is_developed', 'developed']);
@@ -154,6 +371,7 @@ function buildSummaryData(mysqli $conn, int $project_id): ?array {
     $req_is_del_col   = pick($req_cols,  ['is_delivered', 'delivered']);
     $req_uat_col      = pick($req_cols,  ['uat_done', 'is_uat', 'uat']);
     $req_bug_fixed_col= pick($req_cols,  ['bug_fixed', 'is_bug_fixed']);
+    $req_bau_col      = pick($req_cols,  ['bug_after_uat', 'bug_after_uat_done', 'uat_bug']);
     $tc_req_fk        = pick($tc_cols,   ['requirement_id', 'req_id', 'requirements_id', 'module_id', 'feature_id']);
     $tc_exec_col      = pick($tc_cols,   ['executed_by', 'executed_by_id', 'tester_id', 'tester', 'run_by']);
     $tc_assign_col    = pick($tc_cols,   ['assigned_to', 'assigned_to_id', 'assignee_id', 'assignee']);
@@ -172,8 +390,8 @@ function buildSummaryData(mysqli $conn, int $project_id): ?array {
     if ($proj_lead_col)    $sql .= ", u1.name as lead_name";
     if ($proj_qa_lead_col) $sql .= ", u2.name as qa_lead_name";
     $sql .= " FROM projects p LEFT JOIN clients c ON p.client_id = c.id ";
-    if ($proj_lead_col)    $sql .= "LEFT JOIN users u1 ON p.$proj_lead_col = u1.id ";
-    if ($proj_qa_lead_col) $sql .= "LEFT JOIN users u2 ON p.$proj_qa_lead_col = u2.id ";
+    if ($proj_lead_col)    $sql .= "LEFT JOIN users u1 ON p.`$proj_lead_col` = u1.id ";
+    if ($proj_qa_lead_col) $sql .= "LEFT JOIN users u2 ON p.`$proj_qa_lead_col` = u2.id ";
     $sql .= "WHERE p.id = ?";
 
     $stmt = $conn->prepare($sql);
@@ -184,7 +402,7 @@ function buildSummaryData(mysqli $conn, int $project_id): ?array {
 
     if (!$project) return null;
 
-    $req_stats = ['Total' => 0, 'Developed' => 0, 'Tested' => 0, 'Delivered' => 0, 'UAT' => 0, 'Bug Fixed' => 0];
+    $req_stats = ['Total' => 0, 'Developed' => 0, 'Tested' => 0, 'Delivered' => 0, 'UAT' => 0, 'Bug Fixed' => 0, 'Bug After UAT' => 0];
     $req_prio  = ['Critical' => 0, 'High' => 0, 'Medium' => 0, 'Low' => 0];
     if ($req_proj_fk) {
         $r_sel = ["priority"];
@@ -193,15 +411,17 @@ function buildSummaryData(mysqli $conn, int $project_id): ?array {
         if ($req_is_del_col)    $r_sel[] = "`$req_is_del_col` AS is_delivered";
         if ($req_uat_col)       $r_sel[] = "`$req_uat_col` AS uat_done";
         if ($req_bug_fixed_col) $r_sel[] = "`$req_bug_fixed_col` AS bug_fixed";
+        if ($req_bau_col)       $r_sel[] = "`$req_bau_col` AS bug_after_uat";
         $r_sel_sql = implode(', ', $r_sel);
         $r_res = $conn->query("SELECT $r_sel_sql FROM requirements WHERE `$req_proj_fk` = $project_id");
         if ($r_res) while ($r = $r_res->fetch_assoc()) {
             $req_stats['Total']++;
-            if (!empty($r['is_developed']))  $req_stats['Developed']++;
-            if (!empty($r['is_tested']))     $req_stats['Tested']++;
-            if (!empty($r['is_delivered']))  $req_stats['Delivered']++;
-            if (!empty($r['uat_done']))      $req_stats['UAT']++;
-            if (!empty($r['bug_fixed']))     $req_stats['Bug Fixed']++;
+            if (isTruthy($r['is_developed'] ?? null))   $req_stats['Developed']++;
+            if (isTruthy($r['is_tested'] ?? null))      $req_stats['Tested']++;
+            if (isTruthy($r['is_delivered'] ?? null))   $req_stats['Delivered']++;
+            if (isTruthy($r['uat_done'] ?? null))       $req_stats['UAT']++;
+            if (isTruthy($r['bug_fixed'] ?? null))      $req_stats['Bug Fixed']++;
+            if (isTruthy($r['bug_after_uat'] ?? null))  $req_stats['Bug After UAT']++;
             $prio_key = ucfirst(strtolower($r['priority'] ?? ''));
             if (isset($req_prio[$prio_key]))  $req_prio[$prio_key]++;
         }
@@ -213,7 +433,7 @@ function buildSummaryData(mysqli $conn, int $project_id): ?array {
     if ($tc_res) while ($t = $tc_res->fetch_assoc()) {
         $tc_stats['Total']++;
         if (isset($tc_stats[$t['status']])) $tc_stats[$t['status']]++;
-        if ($t['is_auto']) $tc_stats['Automated']++; else $tc_stats['Manual']++;
+        if (isTruthy($t['is_auto'])) $tc_stats['Automated']++; else $tc_stats['Manual']++;
     }
 
     $bug_stats = ['Open' => 0, 'In Progress' => 0, 'Resolved' => 0, 'Closed' => 0];
@@ -226,6 +446,9 @@ function buildSummaryData(mysqli $conn, int $project_id): ?array {
     $resolution_rate = $total_bugs > 0 ? round(($bug_stats['Resolved'] + $bug_stats['Closed']) / $total_bugs * 100, 1) : 0;
     $req_completion  = $req_stats['Total'] > 0 ? round($req_stats['Developed'] / $req_stats['Total'] * 100) : 0;
     $coverage        = $req_stats['Total'] > 0 ? round($req_stats['Tested'] / $req_stats['Total'] * 100) : 0;
+
+    // Get project team info
+    $team = getProjectTeam($conn, $project_id);
 
     $detailed_cases = [];
     $req_join = ''; $req_sel = "NULL AS req_name, NULL AS req_priority,";
@@ -265,11 +488,14 @@ function buildSummaryData(mysqli $conn, int $project_id): ?array {
         $detailed_cases[$grp]['cases'][] = $row;
     }
 
-    return compact(
-        'project', 'req_stats', 'req_prio', 'tc_stats', 'bug_stats',
-        'total_bugs', 'resolution_rate', 'req_completion', 'coverage',
-        'detailed_cases'
-    );
+    return [
+        'project' => $project, 'req_stats' => $req_stats, 'req_prio' => $req_prio,
+        'tc_stats' => $tc_stats, 'bug_stats' => $bug_stats,
+        'total_bugs' => $total_bugs, 'resolution_rate' => $resolution_rate,
+        'req_completion' => $req_completion, 'coverage' => $coverage,
+        'detailed_cases' => $detailed_cases,
+        'developers' => $team['developers'], 'qa_members' => $team['qa_members'],
+    ];
 }
 
 // ══════════════════════════════════════════════════════
@@ -281,7 +507,7 @@ function buildAllProjectsSummary(mysqli $conn): array {
     $tc_cols   = get_cols($conn, 'test_cases');
 
     $proj_lead_col    = pick($proj_cols, ['project_lead_id', 'lead_id', 'manager_id']);
-    $proj_qa_lead_col = pick($proj_cols, ['qa_lead_id', 'qa_lead', 'qa_manager_id', 'tester_lead_id']);
+    $proj_qa_lead_col = pick($proj_cols, ['qa_id', 'qa_lead_id', 'qa_lead', 'qa_manager_id', 'tester_lead_id']);
     $active_col       = pick($proj_cols, ['action', 'is_active', 'active'], 'action');
     $req_proj_fk      = pick($req_cols,  ['project_id', 'proj_id', 'project']);
     $req_is_dev_col   = pick($req_cols,  ['is_developed', 'developed']);
@@ -289,6 +515,7 @@ function buildAllProjectsSummary(mysqli $conn): array {
     $req_is_del_col   = pick($req_cols,  ['is_delivered', 'delivered']);
     $req_uat_col      = pick($req_cols,  ['uat_done', 'is_uat', 'uat']);
     $req_bug_fixed_col= pick($req_cols,  ['bug_fixed', 'is_bug_fixed']);
+    $req_bau_col      = pick($req_cols,  ['bug_after_uat', 'bug_after_uat_done', 'uat_bug']);
     $tc_status_col    = pick($tc_cols,   ['status', 'result', 'test_result', 'test_status'], 'status');
     $tc_bug_raised    = pick($tc_cols,   ['bug_raised', 'has_bug', 'bug_found', 'is_bug']);
     $tc_bug_status    = pick($tc_cols,   ['bug_status', 'bug_state', 'defect_status']);
@@ -300,7 +527,7 @@ function buildAllProjectsSummary(mysqli $conn): array {
     if ($active_col)       $sql .= ", p.`$active_col` as is_active";
     $sql .= " FROM projects p LEFT JOIN clients c ON p.client_id = c.id";
     if ($proj_lead_col)    $sql .= " LEFT JOIN users u1 ON p.$proj_lead_col = u1.id";
-    if ($proj_qa_lead_col) $sql .= " LEFT JOIN users u2 ON p.$proj_qa_lead_col = u2.id";
+    if ($proj_qa_lead_col) $sql .= " LEFT JOIN users u2 ON p.`$proj_qa_lead_col` = u2.id";
     $sql .= " ORDER BY p.name ASC";
 
     $res = $conn->query($sql);
@@ -310,7 +537,7 @@ function buildAllProjectsSummary(mysqli $conn): array {
     $summary = [];
     foreach ($projects as $p) {
         $pid = $p['id'];
-        $req_total = 0; $req_dev = 0; $req_tested = 0; $req_del = 0; $req_uat = 0; $req_bf = 0;
+        $req_total = 0; $req_dev = 0; $req_tested = 0; $req_del = 0; $req_uat = 0; $req_bf = 0; $req_bau = 0;
         if ($req_proj_fk) {
             $r_sel = [];
             if ($req_is_dev_col)    $r_sel[] = "`$req_is_dev_col` AS is_developed";
@@ -318,15 +545,17 @@ function buildAllProjectsSummary(mysqli $conn): array {
             if ($req_is_del_col)    $r_sel[] = "`$req_is_del_col` AS is_delivered";
             if ($req_uat_col)       $r_sel[] = "`$req_uat_col` AS uat_done";
             if ($req_bug_fixed_col) $r_sel[] = "`$req_bug_fixed_col` AS bug_fixed";
+            if ($req_bau_col)       $r_sel[] = "`$req_bau_col` AS bug_after_uat";
             $r_sel_sql = $r_sel ? implode(', ', $r_sel) : '1';
             $r_res = $conn->query("SELECT $r_sel_sql FROM requirements WHERE `$req_proj_fk` = $pid");
             if ($r_res) while ($r = $r_res->fetch_assoc()) {
                 $req_total++;
-                if (!empty($r['is_developed']))  $req_dev++;
-                if (!empty($r['is_tested']))     $req_tested++;
-                if (!empty($r['is_delivered']))  $req_del++;
-                if (!empty($r['uat_done']))      $req_uat++;
-                if (!empty($r['bug_fixed']))     $req_bf++;
+                if (isTruthy($r['is_developed'] ?? null))  $req_dev++;
+                if (isTruthy($r['is_tested'] ?? null))     $req_tested++;
+                if (isTruthy($r['is_delivered'] ?? null))  $req_del++;
+                if (isTruthy($r['uat_done'] ?? null))      $req_uat++;
+                if (isTruthy($r['bug_fixed'] ?? null))     $req_bf++;
+                if (isTruthy($r['bug_after_uat'] ?? null)) $req_bau++;
             }
         }
         $tc_total = 0; $tc_pass = 0; $tc_fail = 0; $tc_nt = 0;
@@ -357,7 +586,7 @@ function buildAllProjectsSummary(mysqli $conn): array {
             $is_active = ($p['is_active'] == 1 || $p['is_active'] === 'active' || $p['is_active'] === '1');
         }
 
-        // ── Get Project Team (Developers & QA Members) ──
+        // Get Project Team (ALL Developers & QA Members)
         $team = getProjectTeam($conn, $pid);
 
         $summary[] = [
@@ -367,7 +596,7 @@ function buildAllProjectsSummary(mysqli $conn): array {
             'qa_lead_name' => $p['qa_lead_name'] ?? 'N/A',
             'developers' => $team['developers'],
             'qa_members' => $team['qa_members'],
-            'req_total' => $req_total, 'req_dev' => $req_dev, 'req_tested' => $req_tested, 'req_del' => $req_del, 'req_uat' => $req_uat, 'req_bf' => $req_bf,
+            'req_total' => $req_total, 'req_dev' => $req_dev, 'req_tested' => $req_tested, 'req_del' => $req_del, 'req_uat' => $req_uat, 'req_bf' => $req_bf, 'req_bau' => $req_bau,
             'tc_total' => $tc_total, 'tc_pass' => $tc_pass, 'tc_fail' => $tc_fail, 'tc_not_tested' => $tc_nt,
             'bug_open' => $bug_open, 'bug_inprog' => $bug_inprog, 'bug_resolved' => $bug_resolved,
             'bug_closed' => $bug_closed, 'total_bugs' => $total_bugs,
@@ -395,50 +624,32 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_excel') {
     header("Content-Disposition: attachment; filename=ProjectReport_{$project_id}.xls");
     header("Pragma: no-cache"); header("Expires: 0");
 
-    // ── Excel-Compatible Style Definitions ──
     $font  = "font-family:Calibri,Arial,sans-serif;";
     $bdr   = "border:1px solid #8faadc;";
     $bdrK  = "border:2px solid #2E75B6;";
     $bdrM  = "border:1px solid #8faadc;";
 
-    // Title bar
     $titleBar  = "background:#2E75B6; color:#ffffff; font-size:16pt; font-weight:bold; text-align:center; padding:16px 14px; $font $bdrK";
-    // Subtitle bar
     $subBar    = "background:#D6E4F0; color:#4472C4; font-size:9pt; padding:8px 14px; $font $bdr text-align:left;";
-    // Section title
     $secTitle  = "background:#4472C4; color:#ffffff; font-size:10pt; font-weight:bold; padding:8px 14px; $font $bdrK";
-    // Info label
     $infoLbl   = "background:#E2EFDA; color:#375623; font-size:10pt; font-weight:bold; padding:8px 12px; $font $bdr text-align:left; white-space:nowrap;";
-    // Info value
     $infoVal   = "background:#ffffff; color:#1a2340; font-size:10pt; padding:8px 12px; $font $bdr text-align:left;";
-    // Table header
     $tblHead   = "background:#2E75B6; color:#ffffff; font-size:10pt; font-weight:bold; padding:10px 8px; $font $bdr text-align:center; white-space:nowrap;";
-    // Cell default (left-aligned for text)
     $cell      = "padding:7px 10px; $font $bdrM font-size:10pt; vertical-align:middle; text-align:left;";
-    // Cell center (for numbers and center-aligned data)
     $cellC     = "padding:7px 10px; $font $bdrM font-size:10pt; text-align:center; vertical-align:middle;";
-    // Module/Requirement group header
     $modHead   = "background:#D6E4F0; color:#2E75B6; font-size:10pt; font-weight:bold; padding:10px 14px; $font $bdr;";
-    // Footer
-   
-    // Spacer row - with thin border so no gap
     $spacer    = "height:8px;background:#ffffff;$bdrM";
 
     if ($type == 'detailed') {
         $numCols = 10;
         echo "<table style='border-collapse:collapse;table-layout:auto; $font'>";
-        // Proper column widths for readability
         echo "<col width='200'><col width='160'><col width='350'><col width='150'><col width='160'><col width='180'><col width='180'><col width='150'><col width='140'><col width='150'>";
 
-        // ── Main Title ──
         echo "<tr><td colspan='$numCols' style='$titleBar'>Project Report - $pname</td></tr>";
         echo "<tr><td colspan='$numCols' style='$subBar'>Generated: $today &nbsp;&nbsp;|&nbsp;&nbsp; Testify QA Management System</td></tr>";
-
-        // ── Spacer ──
         echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-        // ── Project Information ──
-        echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; PROJECT INFORMATION</td></tr>";
+        echo "<tr><td colspan='$numCols' style='$secTitle'>- PROJECT INFORMATION</td></tr>";
         echo "<tr>"
             . "<td colspan='1' style='$infoLbl'>Project Name</td>"
             . "<td colspan='2' style='$infoVal;font-weight:bold;color:#2E75B6;'>$pname</td>"
@@ -455,15 +666,20 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_excel') {
             . "<td colspan='1' style='$infoLbl'>Total TC</td>"
             . "<td colspan='2' style='$infoVal;text-align:center;font-weight:bold;color:#2E75B6;font-size:16pt;'>" . $tc_stats['Total'] . "</td>"
             . "</tr>";
+        echo "<tr>"
+            . "<td colspan='1' style='$infoLbl'>Developers</td>"
+            . "<td colspan='4' style='$infoVal;color:#1a73e8;font-weight:600;'>" . htmlspecialchars($developers ?? 'N/A') . "</td>"
+            . "<td colspan='1' style='$infoLbl'>QA Members</td>"
+            . "<td colspan='4' style='$infoVal;color:#137333;font-weight:600;'>" . htmlspecialchars($qa_members ?? 'N/A') . "</td>"
+            . "</tr>";
 
-        // ── Spacer ──
         echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-        // ── Summary KPI Cards Row ──
-        echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; SUMMARY OVERVIEW</td></tr>";
+        echo "<tr><td colspan='$numCols' style='$secTitle'>- SUMMARY OVERVIEW</td></tr>";
         echo "<tr>";
         $kpiStyles = [
             ['val' => $req_stats['Total'], 'lbl' => 'REQS',          'bg' => '#4472C4', 'fg' => '#ffffff'],
+            ['val' => $tc_stats['Total'],  'lbl' => 'TOTAL TC',      'bg' => '#2E75B6', 'fg' => '#ffffff'],
             ['val' => $tc_stats['Pass'],   'lbl' => 'PASS',          'bg' => '#548235', 'fg' => '#ffffff'],
             ['val' => $tc_stats['Fail'],   'lbl' => 'FAIL',          'bg' => '#C00000', 'fg' => '#ffffff'],
             ['val' => $tc_stats['Not tested'], 'lbl' => 'NOT TESTED','bg' => '#A5A5A5', 'fg' => '#ffffff'],
@@ -471,18 +687,16 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_excel') {
             ['val' => $coverage.'%',       'lbl' => 'COVERAGE',      'bg' => '#4472C4', 'fg' => '#ffffff'],
             ['val' => $req_completion.'%', 'lbl' => 'REQ COMP',      'bg' => '#4472C4', 'fg' => '#ffffff'],
             ['val' => $resolution_rate.'%','lbl' => 'BUG RES',       'bg' => '#548235', 'fg' => '#ffffff'],
-            ['val' => $passRate.'%',       'lbl' => 'PASS RATE',     'bg' => '#4472C4', 'fg' => '#ffffff'],
+            ['val' => $passRate.'%',       'lbl' => 'PASS RATE',     'bg' => '#548235', 'fg' => '#ffffff'],
         ];
         foreach ($kpiStyles as $kpi) {
-            echo "<td style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;padding:14px 6px;$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='font-size:18pt;mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='font-size:7pt;font-weight:bold;letter-spacing:1px;'>{$kpi['lbl']}</span></td>";
+            echo "<td style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;padding:14px 6px;$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='font-size:16pt;mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='font-size:7pt;font-weight:bold;letter-spacing:1px;'>{$kpi['lbl']}</span></td>";
         }
         echo "</tr>";
 
-        // ── Spacer ──
         echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-        // ── Detailed Test Cases ──
-        echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; DETAILED TEST CASES</td></tr>";
+        echo "<tr><td colspan='$numCols' style='$secTitle'>- DETAILED TEST CASES</td></tr>";
         if (empty($detailed_cases)) {
             echo "<tr><td colspan='$numCols' style='$cellC;color:#A5A5A5;font-size:10pt;padding:20px;'>No test cases found.</td></tr>";
         } else {
@@ -509,16 +723,9 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_excel') {
                     $rowBg = ($ci % 2 == 0) ? '#F2F7FB' : '#ffffff';
 
                     $s = $tc['status'];
-                    if ($s === 'Pass') {
-                        $sStyle = "color:#ffffff;font-weight:bold;";
-                        $sBg = "#548235";
-                    } elseif ($s === 'Fail') {
-                        $sStyle = "color:#ffffff;font-weight:bold;";
-                        $sBg = "#C00000";
-                    } else {
-                        $sStyle = "color:#ffffff;font-weight:bold;";
-                        $sBg = "#A5A5A5";
-                    }
+                    if ($s === 'Pass') { $sStyle = "color:#ffffff;font-weight:bold;"; $sBg = "#548235"; }
+                    elseif ($s === 'Fail') { $sStyle = "color:#ffffff;font-weight:bold;"; $sBg = "#C00000"; }
+                    else { $sStyle = "color:#ffffff;font-weight:bold;"; $sBg = "#A5A5A5"; }
 
                     $bs = trim($tc['bug_status'] ?? '');
                     if ($bs === 'Resolved') { $bugBg = '#548235'; $bugFg = '#ffffff'; }
@@ -554,110 +761,160 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_excel') {
         }
 
     } else {
-        // ═══════════════════════════════════════════════
-        //  SUMMARY TYPE
-        // ═══════════════════════════════════════════════
-        $numCols = 6;
-        echo "<table style='border-collapse:collapse;table-layout:auto; $font'>";
-        echo "<col width='200'><col width='200'><col width='200'><col width='200'><col width='200'><col width='200'>";
+        // ── SUMMARY EXCEL: Professional layout with 10-column grid ──
+        $numCols = 10;
+        $colW = 110; // uniform column width
+        echo "<table style='border-collapse:collapse;table-layout:fixed; $font'>";
+        for ($c = 0; $c < $numCols; $c++) echo "<col width='$colW'>";
 
-        // ── Main Title ──
+        // Helper: KPI row with balanced colspan distribution
+        $kpiWide   = "text-align:center;padding:16px 8px;$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;";
+        $kpiNarrow = "text-align:center;padding:16px 6px;$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;";
+        $kpiValBig = "font-size:20pt;mso-number-format:\\@;";
+        $kpiValSm  = "font-size:16pt;mso-number-format:\\@;";
+        $kpiLblBig = "font-size:7pt;font-weight:bold;letter-spacing:1px;";
+        $kpiLblSm  = "font-size:6.5pt;font-weight:bold;letter-spacing:0.5px;";
+
+        // ══════════════════════════════════════════════════
+        //  TITLE BAR
+        // ══════════════════════════════════════════════════
         echo "<tr><td colspan='$numCols' style='$titleBar'>Project Report - $pname</td></tr>";
         echo "<tr><td colspan='$numCols' style='$subBar'>Generated: $today &nbsp;&nbsp;|&nbsp;&nbsp; Testify QA Management System</td></tr>";
         echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-        // ── Project Information ──
-        echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; PROJECT INFORMATION</td></tr>";
+        // ══════════════════════════════════════════════════
+        //  PROJECT INFORMATION
+        // ══════════════════════════════════════════════════
+        echo "<tr><td colspan='$numCols' style='$secTitle'>- PROJECT INFORMATION</td></tr>";
+        // Row 1: Project Name(1+2) + Client(1+2) + Status(1+3) = 10
         echo "<tr>"
             . "<td style='$infoLbl'>Project Name</td>"
-            . "<td style='$infoVal;font-weight:bold;color:#2E75B6;'>$pname</td>"
+            . "<td colspan='2' style='$infoVal;font-weight:bold;color:#2E75B6;'>$pname</td>"
             . "<td style='$infoLbl'>Client</td>"
-            . "<td style='$infoVal'>" . htmlspecialchars($project['client_name'] ?? 'N/A') . "</td>"
+            . "<td colspan='2' style='$infoVal'>" . htmlspecialchars($project['client_name'] ?? 'N/A') . "</td>"
             . "<td style='$infoLbl'>Status</td>"
-            . "<td style='$infoVal'>" . htmlspecialchars($project['status'] ?? 'N/A') . "</td>"
+            . "<td colspan='3' style='$infoVal'>" . htmlspecialchars($project['status'] ?? 'N/A') . "</td>"
             . "</tr>";
+        // Row 2: Project Lead(1+2) + QA Lead(1+2) + Total TC(1+3) = 10
         echo "<tr>"
             . "<td style='$infoLbl'>Project Lead</td>"
-            . "<td style='$infoVal'>" . htmlspecialchars($project['lead_name'] ?? 'N/A') . "</td>"
+            . "<td colspan='2' style='$infoVal'>" . htmlspecialchars($project['lead_name'] ?? 'N/A') . "</td>"
             . "<td style='$infoLbl'>QA Lead</td>"
-            . "<td style='$infoVal'>" . htmlspecialchars($project['qa_lead_name'] ?? 'N/A') . "</td>"
+            . "<td colspan='2' style='$infoVal'>" . htmlspecialchars($project['qa_lead_name'] ?? 'N/A') . "</td>"
             . "<td style='$infoLbl'>Total TC</td>"
-            . "<td style='$infoVal;text-align:center;font-weight:bold;color:#2E75B6;font-size:16pt;'>" . $tc_stats['Total'] . "</td>"
+            . "<td colspan='3' style='$infoVal;text-align:center;font-weight:bold;color:#2E75B6;font-size:16pt;'>" . $tc_stats['Total'] . "</td>"
+            . "</tr>";
+        // Row 3: Developers(1+4) + QA Members(1+4) = 10
+        echo "<tr>"
+            . "<td style='$infoLbl'>Developers</td>"
+            . "<td colspan='4' style='$infoVal;color:#1a73e8;font-weight:600;'>" . htmlspecialchars($developers ?? 'N/A') . "</td>"
+            . "<td style='$infoLbl'>QA Members</td>"
+            . "<td colspan='4' style='$infoVal;color:#137333;font-weight:600;'>" . htmlspecialchars($qa_members ?? 'N/A') . "</td>"
             . "</tr>";
 
-        // ── Spacer ──
         echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-        // ── Summary Overview KPI ──
-        echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; SUMMARY OVERVIEW</td></tr>";
+        // ══════════════════════════════════════════════════
+        //  SUMMARY OVERVIEW (7 KPIs → 3 wide + 4 narrow = 10)
+        // ══════════════════════════════════════════════════
+        echo "<tr><td colspan='$numCols' style='$secTitle'>- SUMMARY OVERVIEW</td></tr>";
         $sumKpis = [
-            ['val' => $req_stats['Total'], 'lbl' => 'Total Requirements', 'bg' => '#4472C4', 'fg' => '#ffffff'],
-            ['val' => $tc_stats['Total'],  'lbl' => 'Total Test Cases',   'bg' => '#2E75B6', 'fg' => '#ffffff'],
-            ['val' => $coverage.'%',       'lbl' => 'Test Coverage',       'bg' => '#5B9BD5', 'fg' => '#ffffff'],
-            ['val' => $resolution_rate.'%','lbl' => 'Bug Resolution',      'bg' => '#548235', 'fg' => '#ffffff'],
-            ['val' => $req_completion.'%', 'lbl' => 'Req Completion',      'bg' => '#4472C4', 'fg' => '#ffffff'],
-            ['val' => $total_bugs,         'lbl' => 'Total Bugs',          'bg' => '#C00000', 'fg' => '#ffffff'],
+            ['val' => $req_stats['Total'], 'lbl' => 'TOTAL REQS',    'bg' => '#4472C4', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $tc_stats['Total'],  'lbl' => 'TOTAL TC',      'bg' => '#2E75B6', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $coverage.'%',       'lbl' => 'COVERAGE',      'bg' => '#5B9BD5', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $resolution_rate.'%','lbl' => 'BUG RES',       'bg' => '#548235', 'fg' => '#ffffff', 'cs' => 1],
+            ['val' => $req_completion.'%', 'lbl' => 'REQ COMP',      'bg' => '#4472C4', 'fg' => '#ffffff', 'cs' => 1],
+            ['val' => $total_bugs,         'lbl' => 'BUGS',          'bg' => '#C00000', 'fg' => '#ffffff', 'cs' => 1],
+            ['val' => $passRate.'%',       'lbl' => 'PASS RATE',     'bg' => '#548235', 'fg' => '#ffffff', 'cs' => 1],
         ];
         echo "<tr>";
         foreach ($sumKpis as $kpi) {
-            echo "<td style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;padding:18px 10px;$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='font-size:22pt;mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='font-size:7pt;font-weight:bold;letter-spacing:1px;'>{$kpi['lbl']}</span></td>";
+            $cs = $kpi['cs'];
+            $vs = ($cs >= 2) ? $kpiValBig : $kpiValSm;
+            $ls = ($cs >= 2) ? $kpiLblBig : $kpiLblSm;
+            $ps = ($cs >= 2) ? 'padding:18px 10px;' : 'padding:16px 6px;';
+            echo "<td colspan='$cs' style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;{$ps}$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='$vs mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='$ls'>{$kpi['lbl']}</span></td>";
         }
         echo "</tr>";
 
-        // ── Spacer ──
         echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-        // ── Requirements Breakdown ──
-        echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; REQUIREMENTS BREAKDOWN</td></tr>";
-        $reqKpis = [
-            ['val' => "{$req_stats['Developed']}/{$req_stats['Total']}", 'lbl' => 'Dev',       'bg' => '#4472C4', 'fg' => '#ffffff'],
-            ['val' => "{$req_stats['Tested']}/{$req_stats['Total']}",    'lbl' => 'Test',      'bg' => '#5B9BD5', 'fg' => '#ffffff'],
-            ['val' => "{$req_stats['Delivered']}/{$req_stats['Total']}", 'lbl' => 'Del',       'bg' => '#2E75B6', 'fg' => '#ffffff'],
-            ['val' => "{$req_stats['UAT']}/{$req_stats['Total']}",       'lbl' => 'UAT',       'bg' => '#ED7D31', 'fg' => '#ffffff'],
-            ['val' => "{$req_stats['Bug Fixed']}/{$req_stats['Total']}", 'lbl' => 'Bug Fixed', 'bg' => '#548235', 'fg' => '#ffffff'],
-            ['val' => $req_prio['Critical'],                             'lbl' => 'Critical',  'bg' => '#C00000', 'fg' => '#ffffff'],
+        // ══════════════════════════════════════════════════
+        //  REQUIREMENTS BREAKDOWN (10 KPIs → 2 rows of 5)
+        // ══════════════════════════════════════════════════
+        echo "<tr><td colspan='$numCols' style='$secTitle'>- REQUIREMENTS BREAKDOWN</td></tr>";
+        // Row 1: Status metrics (5 items, colspan=2 each = 10)
+        $reqKpis1 = [
+            ['val' => "{$req_stats['Developed']}/{$req_stats['Total']}",  'lbl' => 'DEVELOPED',   'bg' => '#4472C4', 'fg' => '#ffffff'],
+            ['val' => "{$req_stats['Tested']}/{$req_stats['Total']}",     'lbl' => 'TESTED',      'bg' => '#5B9BD5', 'fg' => '#ffffff'],
+            ['val' => "{$req_stats['Delivered']}/{$req_stats['Total']}",  'lbl' => 'DELIVERED',   'bg' => '#2E75B6', 'fg' => '#ffffff'],
+            ['val' => "{$req_stats['UAT']}/{$req_stats['Total']}",        'lbl' => 'UAT',         'bg' => '#ED7D31', 'fg' => '#ffffff'],
+            ['val' => "{$req_stats['Bug Fixed']}/{$req_stats['Total']}",  'lbl' => 'BUG FIXED',   'bg' => '#548235', 'fg' => '#ffffff'],
         ];
         echo "<tr>";
-        foreach ($reqKpis as $kpi) {
-            echo "<td style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;padding:16px 10px;$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='font-size:18pt;mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='font-size:7pt;font-weight:bold;letter-spacing:1px;'>{$kpi['lbl']}</span></td>";
+        foreach ($reqKpis1 as $kpi) {
+            echo "<td colspan='2' style='background:{$kpi['bg']};color:{$kpi['fg']};$kpiWide'><b style='$kpiValSm'>{$kpi['val']}</b><br/><span style='$kpiLblBig'>{$kpi['lbl']}</span></td>";
+        }
+        echo "</tr>";
+        // Row 2: Bug After UAT (2 cols) + Priority distribution (4 items × 2 cols = 8) = 10
+        $reqKpis2 = [
+            ['val' => "{$req_stats['Bug After UAT']}/{$req_stats['Total']}", 'lbl' => 'BUG AFTER UAT', 'bg' => '#C00000', 'fg' => '#ffffff'],
+            ['val' => $req_prio['Critical'],  'lbl' => 'CRITICAL',   'bg' => '#C00000', 'fg' => '#ffffff'],
+            ['val' => $req_prio['High'],      'lbl' => 'HIGH',       'bg' => '#ED7D31', 'fg' => '#ffffff'],
+            ['val' => $req_prio['Medium'],    'lbl' => 'MEDIUM',     'bg' => '#FFC000', 'fg' => '#1a2340'],
+            ['val' => $req_prio['Low'],       'lbl' => 'LOW',        'bg' => '#5B9BD5', 'fg' => '#ffffff'],
+        ];
+        echo "<tr>";
+        foreach ($reqKpis2 as $kpi) {
+            echo "<td colspan='2' style='background:{$kpi['bg']};color:{$kpi['fg']};$kpiWide'><b style='$kpiValSm'>{$kpi['val']}</b><br/><span style='$kpiLblBig'>{$kpi['lbl']}</span></td>";
         }
         echo "</tr>";
 
-        // ── Spacer ──
         echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-        // ── Test Case Statistics ──
-        echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; TEST CASE STATISTICS</td></tr>";
+        // ══════════════════════════════════════════════════
+        //  TEST CASE STATISTICS (6 KPIs → 4 wide + 2 narrow = 10)
+        // ══════════════════════════════════════════════════
+        echo "<tr><td colspan='$numCols' style='$secTitle'>- TEST CASE STATISTICS</td></tr>";
         $tcKpis = [
-            ['val' => $tc_stats['Pass'],       'lbl' => 'Passed',      'bg' => '#548235', 'fg' => '#ffffff'],
-            ['val' => $tc_stats['Fail'],        'lbl' => 'Failed',      'bg' => '#C00000', 'fg' => '#ffffff'],
-            ['val' => $tc_stats['Not tested'],  'lbl' => 'Not Tested',  'bg' => '#A5A5A5', 'fg' => '#ffffff'],
-            ['val' => $tc_stats['Automated'],   'lbl' => 'Automated',   'bg' => '#4472C4', 'fg' => '#ffffff'],
-            ['val' => $tc_stats['Manual'],      'lbl' => 'Manual',      'bg' => '#5B9BD5', 'fg' => '#ffffff'],
-            ['val' => $passRate.'%',            'lbl' => 'Pass Rate',   'bg' => '#548235', 'fg' => '#ffffff'],
+            ['val' => $tc_stats['Pass'],       'lbl' => 'PASSED',      'bg' => '#548235', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $tc_stats['Fail'],        'lbl' => 'FAILED',      'bg' => '#C00000', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $tc_stats['Not tested'],  'lbl' => 'NOT TESTED',  'bg' => '#A5A5A5', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $tc_stats['Automated'],   'lbl' => 'AUTOMATED',   'bg' => '#4472C4', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $tc_stats['Manual'],      'lbl' => 'MANUAL',      'bg' => '#5B9BD5', 'fg' => '#ffffff', 'cs' => 1],
+            ['val' => $passRate.'%',            'lbl' => 'PASS RATE',   'bg' => '#548235', 'fg' => '#ffffff', 'cs' => 1],
         ];
         echo "<tr>";
         foreach ($tcKpis as $kpi) {
-            echo "<td style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;padding:16px 10px;$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='font-size:18pt;mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='font-size:7pt;font-weight:bold;letter-spacing:1px;'>{$kpi['lbl']}</span></td>";
+            $cs = $kpi['cs'];
+            $vs = ($cs >= 2) ? $kpiValBig : $kpiValSm;
+            $ls = ($cs >= 2) ? $kpiLblBig : $kpiLblSm;
+            $ps = ($cs >= 2) ? 'padding:18px 10px;' : 'padding:16px 6px;';
+            echo "<td colspan='$cs' style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;{$ps}$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='$vs mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='$ls'>{$kpi['lbl']}</span></td>";
         }
         echo "</tr>";
 
-        // ── Spacer ──
         echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-        // ── Bug Statistics ──
-        echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; BUG STATISTICS</td></tr>";
+        // ══════════════════════════════════════════════════
+        //  BUG STATISTICS (6 KPIs → 4 wide + 2 narrow = 10)
+        // ══════════════════════════════════════════════════
+        echo "<tr><td colspan='$numCols' style='$secTitle'>- BUG STATISTICS</td></tr>";
         $bugKpis = [
-            ['val' => $bug_stats['Open'],       'lbl' => 'Open',           'bg' => '#C00000', 'fg' => '#ffffff'],
-            ['val' => $bug_stats['In Progress'],'lbl' => 'In Progress',    'bg' => '#ED7D31', 'fg' => '#ffffff'],
-            ['val' => $bug_stats['Resolved'],   'lbl' => 'Resolved',       'bg' => '#548235', 'fg' => '#ffffff'],
-            ['val' => $bug_stats['Closed'],     'lbl' => 'Closed',         'bg' => '#375623', 'fg' => '#ffffff'],
-            ['val' => $total_bugs,              'lbl' => 'Total Bugs',     'bg' => '#C00000', 'fg' => '#ffffff'],
-            ['val' => $resolution_rate.'%',     'lbl' => 'Resolution Rate','bg' => '#548235', 'fg' => '#ffffff'],
+            ['val' => $bug_stats['Open'],       'lbl' => 'OPEN',           'bg' => '#C00000', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $bug_stats['In Progress'],'lbl' => 'IN PROGRESS',    'bg' => '#ED7D31', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $bug_stats['Resolved'],   'lbl' => 'RESOLVED',       'bg' => '#548235', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $bug_stats['Closed'],     'lbl' => 'CLOSED',         'bg' => '#375623', 'fg' => '#ffffff', 'cs' => 2],
+            ['val' => $total_bugs,              'lbl' => 'TOTAL BUGS',     'bg' => '#C00000', 'fg' => '#ffffff', 'cs' => 1],
+            ['val' => $resolution_rate.'%',     'lbl' => 'RES RATE',       'bg' => '#548235', 'fg' => '#ffffff', 'cs' => 1],
         ];
         echo "<tr>";
         foreach ($bugKpis as $kpi) {
-            echo "<td style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;padding:16px 10px;$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='font-size:18pt;mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='font-size:7pt;font-weight:bold;letter-spacing:1px;'>{$kpi['lbl']}</span></td>";
+            $cs = $kpi['cs'];
+            $vs = ($cs >= 2) ? $kpiValBig : $kpiValSm;
+            $ls = ($cs >= 2) ? $kpiLblBig : $kpiLblSm;
+            $ps = ($cs >= 2) ? 'padding:18px 10px;' : 'padding:16px 6px;';
+            echo "<td colspan='$cs' style='background:{$kpi['bg']};color:{$kpi['fg']};text-align:center;{$ps}$font border:2px solid #ffffff;vertical-align:middle;mso-number-format:\\@;'><b style='$vs mso-number-format:\\@;'>{$kpi['val']}</b><br/><span style='$ls'>{$kpi['lbl']}</span></td>";
         }
         echo "</tr>";
     }
@@ -675,35 +932,28 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_all_excel') {
     header("Content-Disposition: attachment; filename=AllProjectsSummary_" . date('Ymd') . ".xls");
     header("Pragma: no-cache"); header("Expires: 0");
 
-    // ── Style Definitions ──
     $font  = "font-family:Calibri,Arial,sans-serif;";
     $bdr   = "border:1px solid #8faadc;";
     $bdrK  = "border:2px solid #2E75B6;";
     $bdrM  = "border:1px solid #8faadc;";
 
-    $titleBar = "background:linear-gradient(#2E75B6,#1F4E79); background:#2E75B6; color:#ffffff; font-size:18pt; font-weight:bold; text-align:center; padding:20px 14px; $font $bdrK";
+    $titleBar = "background:#2E75B6; color:#ffffff; font-size:18pt; font-weight:bold; text-align:center; padding:20px 14px; $font $bdrK";
     $subBar   = "background:#D6E4F0; color:#4472C4; font-size:10pt; padding:10px 14px; $font $bdr text-align:left;";
     $secTitle = "background:#4472C4; color:#ffffff; font-size:11pt; font-weight:bold; padding:10px 14px; $font $bdrK";
     $tblHead  = "background:#2E75B6; color:#ffffff; font-size:9.5pt; font-weight:bold; padding:10px 6px; $font $bdr text-align:center; white-space:nowrap;";
     $cell     = "padding:8px 10px; $font $bdrM font-size:9.5pt; vertical-align:middle; text-align:left;";
     $cellC    = "padding:8px 10px; $font $bdrM font-size:9.5pt; text-align:center; vertical-align:middle;";
-    $cellDev  = "padding:8px 10px; $font $bdrM font-size:9.5pt; vertical-align:middle; text-align:left; background:#E8F0FE;";
-    $cellQA   = "padding:8px 10px; $font $bdrM font-size:9.5pt; vertical-align:middle; text-align:left; background:#E6F4EA;";
-    $footBar  = "background:#2E75B6; color:#ffffff; font-size:8pt; padding:10px 14px; $font $bdrK text-align:center;";
     $spacer   = "height:10px;background:#ffffff;$bdrM";
 
-    // ── 18 columns: S.NO | Project | Client | QA Lead | Project Lead | Developers | QA Members | Status | Active | Reqs | TC Total | Pass | Fail | NT | Pass Rate | Coverage | Bugs | Bug Res % ──
     $numCols = 18;
 
     echo "<table style='border-collapse:collapse;table-layout:auto; $font'>";
     echo "<col width='50'><col width='200'><col width='110'><col width='110'><col width='110'><col width='200'><col width='200'><col width='80'><col width='50'><col width='50'><col width='60'><col width='50'><col width='50'><col width='50'><col width='70'><col width='70'><col width='50'><col width='70'>";
 
-    // ── Main Title ──
-    echo "<tr><td colspan='$numCols' style='$titleBar'>&#128202; All Projects Summary Report</td></tr>";
+    echo "<tr><td colspan='$numCols' style='$titleBar'>All Projects Summary Report</td></tr>";
     echo "<tr><td colspan='$numCols' style='$subBar'>Generated: $today &nbsp;&nbsp;|&nbsp;&nbsp; Testify QA Management System &nbsp;&nbsp;|&nbsp;&nbsp; Total Projects: " . count($all_summary) . "</td></tr>";
     echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-    // ── Calculate Totals ──
     $tReq=0; $tTc=0; $tPass=0; $tFail=0; $tBugs=0; $tActive=0; $tBugRes=0; $tBugResW=0;
     foreach ($all_summary as $s) {
         $tReq+=$s['req_total']; $tTc+=$s['tc_total']; $tPass+=$s['tc_pass']; $tFail+=$s['tc_fail']; $tBugs+=$s['total_bugs']; if($s['is_active'])$tActive++;
@@ -712,8 +962,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_all_excel') {
     $tInactive=count($all_summary)-$tActive; $tPassRate=$tTc>0?round($tPass/$tTc*100,1):0;
     $tOverallBugRes = $tBugResW > 0 ? round($tBugRes / $tBugResW, 1) : 0;
 
-    // ── Overview KPI Cards Row 1 ──
-    echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; OVERVIEW</td></tr>";
+    echo "<tr><td colspan='$numCols' style='$secTitle'>- OVERVIEW</td></tr>";
     $ovRow1 = [
         ['val' => count($all_summary), 'lbl' => 'TOTAL PROJECTS', 'bg' => '#4472C4', 'fg' => '#ffffff'],
         ['val' => $tActive,            'lbl' => 'ACTIVE',         'bg' => '#548235', 'fg' => '#ffffff'],
@@ -728,7 +977,6 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_all_excel') {
     }
     echo "</tr>";
 
-    // ── Overview KPI Cards Row 2 ──
     $ovRow2 = [
         ['val' => $tFail,              'lbl' => 'FAILED',         'bg' => '#C00000', 'fg' => '#ffffff'],
         ['val' => $tPassRate.'%',      'lbl' => 'PASS RATE',      'bg' => '#4472C4', 'fg' => '#ffffff'],
@@ -745,16 +993,15 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_all_excel') {
 
     echo "<tr><td colspan='$numCols' style='$spacer'></td></tr>";
 
-    // ── Project Details Table ──
-    echo "<tr><td colspan='$numCols' style='$secTitle'>&#9654; PROJECT DETAILS</td></tr>";
+    echo "<tr><td colspan='$numCols' style='$secTitle'>- PROJECT DETAILS</td></tr>";
     echo "<tr>"
         . "<th style='$tblHead'>S.NO.</th>"
         . "<th style='$tblHead'>Project</th>"
         . "<th style='$tblHead'>Client</th>"
         . "<th style='$tblHead'>QA Lead</th>"
         . "<th style='$tblHead'>Project Lead</th>"
-        . "<th style='background:#4472C4; color:#ffffff; font-size:9.5pt; font-weight:bold; padding:10px 6px; $font $bdr text-align:center; white-space:nowrap;'>&#128187; Developers</th>"
-        . "<th style='background:#548235; color:#ffffff; font-size:9.5pt; font-weight:bold; padding:10px 6px; $font $bdr text-align:center; white-space:nowrap;'>&#128269; QA Members</th>"
+        . "<th style='background:#4472C4; color:#ffffff; font-size:9.5pt; font-weight:bold; padding:10px 6px; $font $bdr text-align:center; white-space:nowrap;'>Developers</th>"
+        . "<th style='background:#548235; color:#ffffff; font-size:9.5pt; font-weight:bold; padding:10px 6px; $font $bdr text-align:center; white-space:nowrap;'>QA Members</th>"
         . "<th style='$tblHead'>Status</th>"
         . "<th style='$tblHead'>Active</th>"
         . "<th style='$tblHead'>Reqs</th>"
@@ -779,28 +1026,24 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_all_excel') {
         $actFg = '#ffffff';
         $actTxt = $s['is_active'] ? 'Yes' : 'No';
 
-        // Status color
         $st = strtolower($s['status']);
         if ($st === 'active' || $st === 'in progress') { $stBg = '#548235'; $stFg = '#ffffff'; }
         elseif ($st === 'completed' || $st === 'closed') { $stBg = '#2E75B6'; $stFg = '#ffffff'; }
         elseif ($st === 'on hold') { $stBg = '#ED7D31'; $stFg = '#ffffff'; }
         else { $stBg = $rowBg; $stFg = '#1a2340'; }
 
-        // Pass Rate color
         $pr = $s['pass_rate'];
         if ($pr >= 80) { $prBg = '#548235'; $prFg = '#ffffff'; }
         elseif ($pr >= 50) { $prBg = '#ED7D31'; $prFg = '#ffffff'; }
         elseif ($pr > 0) { $prBg = '#C00000'; $prFg = '#ffffff'; }
         else { $prBg = $rowBg; $prFg = '#7F7F7F'; }
 
-        // Coverage color
         $cv = $s['coverage'];
         if ($cv >= 80) { $cvBg = '#548235'; $cvFg = '#ffffff'; }
         elseif ($cv >= 50) { $cvBg = '#ED7D31'; $cvFg = '#ffffff'; }
         elseif ($cv > 0) { $cvBg = '#C00000'; $cvFg = '#ffffff'; }
         else { $cvBg = $rowBg; $cvFg = '#7F7F7F'; }
 
-        // Bug Res color
         $br = $s['resolution_rate'];
         if ($br >= 80) { $brBg = '#548235'; $brFg = '#ffffff'; }
         elseif ($br >= 50) { $brBg = '#ED7D31'; $brFg = '#ffffff'; }
@@ -839,7 +1082,6 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_all_pdf') {
     $all_summary = buildAllProjectsSummary($conn);
     $today = date('d F Y');
 
-    // ── Calculate Totals ──
     $tReq=0; $tTc=0; $tPass=0; $tFail=0; $tBugs=0; $tActive=0; $tBugRes=0; $tBugResW=0;
     foreach ($all_summary as $s) {
         $tReq+=$s['req_total']; $tTc+=$s['tc_total']; $tPass+=$s['tc_pass']; $tFail+=$s['tc_fail']; $tBugs+=$s['total_bugs']; if($s['is_active'])$tActive++;
@@ -989,12 +1231,12 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_pdf') {
 ?>
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"/>
-<title>Project Report — <?= $pname ?></title>
+<title>Project Report - <?= $pname ?></title>
 <link rel="stylesheet" href="../css/pr.css">
 </head>
 <body>
 <div class="no-print"><button class="btn-print" onclick="window.print()">Print / Save as PDF</button><button class="btn-close" onclick="window.close()">Close</button></div>
-<div class="header"><h1>Project Report — <?= $pname ?></h1><div class="sub">Client: <?= htmlspecialchars($project['client_name'] ?? 'N/A') ?></div><div class="gen">Generated: <?= $today ?> | Testify QA Management</div></div>
+<div class="header"><h1>Project Report - <?= $pname ?></h1><div class="sub">Client: <?= htmlspecialchars($project['client_name'] ?? 'N/A') ?></div><div class="gen">Generated: <?= $today ?> | Testify QA Management</div></div>
 <div class="info-bar">
   <div class="info-cell"><span class="ic-label">Status</span><span class="ic-val"><?= htmlspecialchars($project['status'] ?? 'N/A') ?></span></div>
   <div class="info-cell"><span class="ic-label">Project Lead</span><span class="ic-val"><?= htmlspecialchars($project['lead_name'] ?? 'N/A') ?></span></div>
@@ -1014,6 +1256,16 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_pdf') {
 <div class="prog-row"><div class="prog-top"><span>Req Completion: <?= $req_completion ?>%</span></div><div class="prog-bg"><div class="prog-fill" style="width:<?= $req_completion ?>%;background:#3a7bd5;"></div></div></div>
 <div class="prog-row"><div class="prog-top"><span>Test Coverage: <?= $coverage ?>%</span></div><div class="prog-bg"><div class="prog-fill" style="width:<?= $coverage ?>%;background:#f1c40f;"></div></div></div>
 <div style="display:flex;gap:4px;margin-bottom:6px;margin-top:8px;">
+  <div style="flex:1;border:1px solid #dde4f0;border-radius:4px;padding:6px;background:#E8F0FE;">
+    <div style="font-size:9pt;font-weight:700;color:#1a73e8;margin-bottom:2px;">Developers</div>
+    <div style="font-size:10pt;color:#1a2340;font-weight:600;"><?= htmlspecialchars($developers ?? 'N/A') ?></div>
+  </div>
+  <div style="flex:1;border:1px solid #dde4f0;border-radius:4px;padding:6px;background:#E6F4EA;">
+    <div style="font-size:9pt;font-weight:700;color:#137333;margin-bottom:2px;">QA Members</div>
+    <div style="font-size:10pt;color:#1a2340;font-weight:600;"><?= htmlspecialchars($qa_members ?? 'N/A') ?></div>
+  </div>
+</div>
+<div style="display:flex;gap:4px;margin-bottom:6px;margin-top:8px;">
   <div style="flex:1;border:1px solid #dde4f0;border-radius:4px;padding:4px;">
     <div class="sec-title">Requirements</div>
     <div class="req-grid" style="margin-bottom:0;">
@@ -1022,9 +1274,10 @@ if (isset($_GET['action']) && $_GET['action'] == 'export_pdf') {
       <div class="req-box"><div class="rv"><?= $req_stats['Delivered'] ?>/<?= $req_stats['Total'] ?></div><span class="rl">Del</span></div>
       <div class="req-box"><div class="rv"><?= $req_stats['UAT'] ?>/<?= $req_stats['Total'] ?></div><span class="rl">UAT</span></div>
       <div class="req-box"><div class="rv"><?= $req_stats['Bug Fixed'] ?>/<?= $req_stats['Total'] ?></div><span class="rl">Bug Fix</span></div>
+      <div class="req-box"><div class="rv"><?= $req_stats['Bug After UAT'] ?>/<?= $req_stats['Total'] ?></div><span class="rl">Bug After UAT</span></div>
     </div>
     <div style="display:flex;gap:3px;margin-top:2px;">
-      <span class="ptag critical">Crit: <?= $req_prio['Critical'] ?></span><span class="ptag high">High: <?= $req_prio['High'] ?></span><span class="ptag medium">Med: <?= $req_prio['Medium'] ?></span>
+      <span class="ptag critical">Crit: <?= $req_prio['Critical'] ?></span><span class="ptag high">High: <?= $req_prio['High'] ?></span><span class="ptag medium">Med: <?= $req_prio['Medium'] ?></span><span class="ptag low" style="background:#5B9BD5;color:#fff;padding:2px 8px;border-radius:10px;font-size:8pt;font-weight:700;">Low: <?= $req_prio['Low'] ?></span>
     </div>
   </div>
   <div style="flex:1.5;border:1px solid #dde4f0;border-radius:4px;padding:4px;">
@@ -1097,6 +1350,7 @@ if ($selected_project > 0) {
             'bug_stats' => $raw['bug_stats'], 'resolution_rate' => $raw['resolution_rate'],
             'req_completion' => $raw['req_completion'], 'coverage' => $raw['coverage'],
             'detailed_cases' => $raw['detailed_cases'],
+            'developers' => $raw['developers'], 'qa_members' => $raw['qa_members'],
         ];
     }
 }
@@ -1107,7 +1361,7 @@ if ($selected_project > 0) {
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TestiFy — Project Reports</title>
+<title>TestiFy - Project Reports</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="../css/pr1.css"/>
 
@@ -1305,7 +1559,7 @@ if ($selected_project > 0) {
   <?php else: extract($report_data); $proj = $project_details; ?>
 
   <div class="proj-title">
-    <h2><?= htmlspecialchars($proj['name']) ?> — Project Report</h2>
+    <h2><?= htmlspecialchars($proj['name']) ?> - Project Report</h2>
     <div class="gen">Created (Updated: <?= date('d F Y') ?>) | TestiFy QA Management</div>
   </div>
 
@@ -1313,6 +1567,8 @@ if ($selected_project > 0) {
     <div class="proj-info-cell"><div class="pi-label">Status</div><div class="pi-val"><?= htmlspecialchars($proj['status'] ?? 'N/A') ?></div></div>
     <div class="proj-info-cell"><div class="pi-label">Project Lead</div><div class="pi-val"><?= htmlspecialchars($proj['lead_name']) ?></div></div>
     <div class="proj-info-cell"><div class="pi-label">QA Lead</div><div class="pi-val"><?= htmlspecialchars($proj['qa_lead_name']) ?></div></div>
+    <div class="proj-info-cell"><div class="pi-label">Developers</div><div class="pi-val" style="color:#1a73e8;font-weight:600;"><?= htmlspecialchars($developers ?? 'N/A') ?></div></div>
+    <div class="proj-info-cell"><div class="pi-label">QA Members</div><div class="pi-val" style="color:#137333;font-weight:600;"><?= htmlspecialchars($qa_members ?? 'N/A') ?></div></div>
   </div>
 
   <div class="tabs">
@@ -1344,6 +1600,7 @@ if ($selected_project > 0) {
         <div class="req-col"><div class="rc-lbl">Del</div><div class="rc-val"><?= $req_stats['Delivered'] ?>/<?= $req_stats['Total'] ?></div></div>
         <div class="req-col"><div class="rc-lbl">UAT</div><div class="rc-val"><?= $req_stats['UAT'] ?>/<?= $req_stats['Total'] ?></div></div>
         <div class="req-col"><div class="rc-lbl">Bug Fixed</div><div class="rc-val"><?= $req_stats['Bug Fixed'] ?>/<?= $req_stats['Total'] ?></div></div>
+        <div class="req-col"><div class="rc-lbl">Bug After UAT</div><div class="rc-val"><?= $req_stats['Bug After UAT'] ?>/<?= $req_stats['Total'] ?></div></div>
       </div>
       <div class="sec-title" style="font-size:13px;margin-bottom:8px;">Priority Distribution</div>
       <div class="prio-tags">
