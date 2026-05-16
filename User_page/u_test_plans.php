@@ -2,6 +2,7 @@
 // ── user_page/u_test_plans.php ─────────────────────────────
 // USER VERSION: Full CRUD same as admin, with project assignment validation
 // When filtering by client only → show all test plans for that client
+// TP ID is project-specific: each project starts at TP-001
 session_start();
 include '../config/db.php';
 
@@ -11,6 +12,7 @@ error_reporting(E_ALL);
 
 $msg      = '';
 $msg_type = '';
+$self     = strtok($_SERVER['REQUEST_URI'], '?'); // base URL for redirects
 
 // ════════════════════════════════════════════════════════
 //  SMART SESSION DETECTION
@@ -97,15 +99,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
 
     // ── VALIDATION: Check project assignment ──
     if (!isProjectAllowed($import_project_id)) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?not_allowed=1');
+        header('Location: ' . $self . '?not_allowed=1');
         exit;
     }
 
     if (!$import_project_id) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?import_err=1');
+        header('Location: ' . $self . '?import_err=1');
         exit;
     } elseif (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?import_err=1');
+        header('Location: ' . $self . '?import_err=1');
         exit;
     } else {
         $file   = $_FILES['csv_file']['tmp_name'];
@@ -153,27 +155,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
             $testing_types = !empty($types_csv) ? array_map('trim', explode(',', $types_csv)) : [];
             $tech_csv      = trim($data['technologies'] ?? '');
             $technologies  = !empty($tech_csv) ? array_map('trim', explode(',', $tech_csv)) : [];
-            $lead_id       = (int)($data['project_lead_id'] ?? 0);
-            $test_lead_id  = (int)($data['test_lead_id']    ?? 0);
+            $lead_id       = !empty($data['project_lead_id']) ? (int)$data['project_lead_id'] : null;
+            $test_lead_id  = !empty($data['test_lead_id'])    ? (int)$data['test_lead_id']    : null;
 
             if (!$title) { $errors++; continue; }
 
-            $stmt = $conn->prepare(
-                "INSERT INTO test_plans (project_id, title, objective, scope, testing_types, technologies, project_lead_id, test_lead_id, roles_covered)
-                 VALUES (?,?,?,?,?,?,?,?,?)"
-            );
-            $stmt->bind_param('isssssiis',
-                $pid_to_use, $title, $objective, $scope,
-                json_encode($testing_types), json_encode($technologies),
-                $lead_id, $test_lead_id, $roles
-            );
+            $testing_types_json = json_encode($testing_types);
+            $technologies_json  = json_encode($technologies);
+
+            // ── Dynamic INSERT to handle NULL lead IDs properly ──
+            $csv_fields = "project_id, title, objective, scope, testing_types, technologies, roles_covered";
+            $csv_places = "?,?,?,?,?,?,?";
+            $csv_types  = "issssss";
+            $csv_vals   = [$pid_to_use, $title, $objective, $scope, $testing_types_json, $technologies_json, $roles];
+
+            if ($lead_id !== null) {
+                $csv_fields .= ", project_lead_id";
+                $csv_places .= ",?";
+                $csv_types  .= "i";
+                $csv_vals[]  = $lead_id;
+            }
+            if ($test_lead_id !== null) {
+                $csv_fields .= ", test_lead_id";
+                $csv_places .= ",?";
+                $csv_types  .= "i";
+                $csv_vals[]  = $test_lead_id;
+            }
+
+            $stmt = $conn->prepare("INSERT INTO test_plans ($csv_fields) VALUES ($csv_places)");
+            $stmt->bind_param($csv_types, ...$csv_vals);
 
             if ($stmt->execute()) $imported++; else $errors++;
             $stmt->close();
         }
         fclose($handle);
 
-        $redirect = strtok($_SERVER['REQUEST_URI'], '?') . "?imported=$imported";
+        $redirect = $self . "?imported=$imported";
         if ($errors) $redirect .= "&imp_err=$errors";
         header("Location: $redirect");
         exit;
@@ -198,7 +215,7 @@ if (isset($_GET['delete'])) {
             echo json_encode(['success' => false, 'error' => 'Not allowed']);
             exit;
         }
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?not_allowed=1');
+        header('Location: ' . $self . '?not_allowed=1');
         exit;
     }
 
@@ -211,7 +228,7 @@ if (isset($_GET['delete'])) {
         echo json_encode(['success' => true]);
         exit;
     }
-    header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?deleted=1');
+    header('Location: ' . $self . '?deleted=1');
     exit;
 }
 
@@ -225,35 +242,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     $scope        = trim($_POST['scope']             ?? '');
     $post_types   = $_POST['testing_types']          ?? [];
     $techs        = $_POST['technologies']           ?? [];
-    $lead_id      = (int)($_POST['project_lead_id']  ?? 0);
-    $test_lead_id = (int)($_POST['test_lead_id']     ?? 0);
+    $lead_id      = !empty($_POST['project_lead_id']) ? (int)$_POST['project_lead_id'] : null;
+    $test_lead_id = !empty($_POST['test_lead_id'])    ? (int)$_POST['test_lead_id']    : null;
     $roles        = trim($_POST['roles_covered']     ?? '');
 
     // ── VALIDATION: Check project assignment ──
     if (!isProjectAllowed($project_id)) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?not_allowed=1');
+        header('Location: ' . $self . '?not_allowed=1');
         exit;
     }
 
     if (!$project_id || !$title || !$objective || !$scope) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?add_err=1');
+        header('Location: ' . $self . '?add_err=1');
         exit;
     }
-    $stmt = $conn->prepare(
-        "INSERT INTO test_plans (project_id, title, objective, scope, testing_types, technologies, project_lead_id, test_lead_id, roles_covered)
-         VALUES (?,?,?,?,?,?,?,?,?)"
-    );
-    $stmt->bind_param('isssssiis',
-        $project_id, $title, $objective, $scope,
-        json_encode($post_types), json_encode($techs),
-        $lead_id, $test_lead_id, $roles
-    );
-    if ($stmt->execute()) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?added=1'); exit;
-    } else {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?add_err=1'); exit;
+    $testing_types_json = json_encode($post_types);
+    $technologies_json  = json_encode($techs);
+
+    // ── Dynamic INSERT to handle NULL lead IDs properly ──
+    $ins_fields = "project_id, title, objective, scope, testing_types, technologies, roles_covered";
+    $ins_places = "?,?,?,?,?,?,?";
+    $ins_types  = "issssss";
+    $ins_vals   = [$project_id, $title, $objective, $scope, $testing_types_json, $technologies_json, $roles];
+
+    if ($lead_id !== null) {
+        $ins_fields .= ", project_lead_id";
+        $ins_places .= ",?";
+        $ins_types  .= "i";
+        $ins_vals[]  = $lead_id;
     }
-    $stmt->close();
+    if ($test_lead_id !== null) {
+        $ins_fields .= ", test_lead_id";
+        $ins_places .= ",?";
+        $ins_types  .= "i";
+        $ins_vals[]  = $test_lead_id;
+    }
+
+    $stmt = $conn->prepare("INSERT INTO test_plans ($ins_fields) VALUES ($ins_places)");
+    $stmt->bind_param($ins_types, ...$ins_vals);
+    if ($stmt->execute()) {
+        $stmt->close();
+        header('Location: ' . $self . '?added=1'); exit;
+    } else {
+        $stmt->close();
+        header('Location: ' . $self . '?add_err=1'); exit;
+    }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -267,56 +300,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
     $scope        = trim($_POST['scope']              ?? '');
     $post_types   = $_POST['testing_types']           ?? [];
     $techs        = $_POST['technologies']            ?? [];
-    $lead_id      = (int)($_POST['project_lead_id']   ?? 0);
-    $test_lead_id = (int)($_POST['test_lead_id']      ?? 0);
+    $lead_id      = !empty($_POST['project_lead_id']) ? (int)$_POST['project_lead_id'] : null;
+    $test_lead_id = !empty($_POST['test_lead_id'])    ? (int)$_POST['test_lead_id']    : null;
     $roles        = trim($_POST['roles_covered']      ?? '');
 
     // ── VALIDATION: Check project assignment ──
     if (!isProjectAllowed($project_id)) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?not_allowed=1');
+        header('Location: ' . $self . '?not_allowed=1');
         exit;
     }
 
     if (!$project_id || !$title || !$scope) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?edit_err=1');
+        header('Location: ' . $self . '?edit_err=1');
         exit;
     }
-    $stmt = $conn->prepare(
-        "UPDATE test_plans SET project_id=?, title=?, objective=?, scope=?, testing_types=?, technologies=?, project_lead_id=?, test_lead_id=?, roles_covered=? WHERE id=?"
-    );
-    $stmt->bind_param('isssssiisi',
-        $project_id, $title, $objective, $scope,
-        json_encode($post_types), json_encode($techs),
-        $lead_id, $test_lead_id, $roles, $edit_id
-    );
-    if ($stmt->execute()) {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?updated=1'); exit;
+    $testing_types_json = json_encode($post_types);
+    $technologies_json  = json_encode($techs);
+
+    // ── Dynamic UPDATE to handle NULL lead IDs properly ──
+    $set_parts = "project_id=?, title=?, objective=?, scope=?, testing_types=?, technologies=?, roles_covered=?";
+    $upd_types = "issssss";
+    $upd_vals  = [$project_id, $title, $objective, $scope, $testing_types_json, $technologies_json, $roles];
+
+    if ($lead_id !== null) {
+        $set_parts .= ", project_lead_id=?";
+        $upd_types .= "i";
+        $upd_vals[] = $lead_id;
     } else {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?edit_err=1'); exit;
+        $set_parts .= ", project_lead_id=NULL";
     }
-    $stmt->close();
+    if ($test_lead_id !== null) {
+        $set_parts .= ", test_lead_id=?";
+        $upd_types .= "i";
+        $upd_vals[] = $test_lead_id;
+    } else {
+        $set_parts .= ", test_lead_id=NULL";
+    }
+
+    $set_parts .= " WHERE id=?";
+    $upd_types .= "i";
+    $upd_vals[] = $edit_id;
+
+    $stmt = $conn->prepare("UPDATE test_plans SET $set_parts");
+    $stmt->bind_param($upd_types, ...$upd_vals);
+    if ($stmt->execute()) {
+        $stmt->close();
+        header('Location: ' . $self . '?updated=1'); exit;
+    } else {
+        $stmt->close();
+        header('Location: ' . $self . '?edit_err=1'); exit;
+    }
 }
 
 // ════════════════════════════════════════════════════════════
 //  FETCH DATA
 // ════════════════════════════════════════════════════════════
-// Fetch ALL clients (for filter dropdown - user can filter by any client)
-$clients_list = [];
-$c_res = $conn->query("SELECT id, name FROM clients WHERE status='active' ORDER BY name");
-if ($c_res) while ($r = $c_res->fetch_assoc()) $clients_list[] = $r;
-
-// Fetch ALL projects (for filter dropdown - when client selected, show all projects under that client)
-$projects_list = [];
-$p_res = $conn->query("SELECT id, client_id, name FROM projects ORDER BY name ASC");
-if ($p_res) while ($r = $p_res->fetch_assoc()) $projects_list[] = $r;
-
-// Fetch assigned projects only (for Add/Edit/Import modal dropdowns)
+// Fetch assigned projects only (used for filter dropdowns AND modal dropdowns)
 $assigned_projects_list = [];
 if (!empty($user_assigned_project_ids)) {
     $apids = implode(',', array_map('intval', $user_assigned_project_ids));
     $ap_res = $conn->query("SELECT id, client_id, name FROM projects WHERE id IN ($apids) ORDER BY name ASC");
     if ($ap_res) while ($r = $ap_res->fetch_assoc()) $assigned_projects_list[] = $r;
 }
+
+// Fetch ONLY clients that have projects assigned to this user
+$clients_list = [];
+if (!empty($assigned_projects_list)) {
+    $client_ids = array_unique(array_map(fn($p) => (int)$p['client_id'], $assigned_projects_list));
+    $cid_list = implode(',', array_map('intval', $client_ids));
+    $c_res = $conn->query("SELECT id, name FROM clients WHERE id IN ($cid_list) AND status='active' ORDER BY name");
+    if ($c_res) while ($r = $c_res->fetch_assoc()) $clients_list[] = $r;
+}
+
+// For filter dropdown: same as assigned projects
+$projects_list = $assigned_projects_list;
 
 $dev_list = [];
 $d_res = $conn->query("SELECT id, name, username FROM users WHERE role='Developer' ORDER BY name");
@@ -349,14 +406,12 @@ $client_only_filter = ($filter_client && !$filter_project);
 
 if ($client_only_filter) {
     // Client-only filter: show ALL test plans under that client (no project assignment restriction)
-    // Don't add the project_id IN clause
 } else {
     // No filter or project-specific filter: restrict to assigned projects
     if (!empty($user_assigned_project_ids)) {
         $pid_list = implode(',', array_map('intval', $user_assigned_project_ids));
         $base_where[] = "tp.project_id IN ($pid_list)";
     } else {
-        // No assigned projects → force empty result
         $base_where[] = "1=0";
     }
 }
@@ -383,7 +438,21 @@ if ($filters_applied) {
 
 $whereStr = !empty($base_where) ? 'WHERE ' . implode(' AND ', $base_where) : '';
 
-if (!empty($whereStr)) {
+// ── Project-specific TP sequence subquery ──
+// This calculates the sequential number of each test plan within its project
+// Ordered by created_at ASC + id ASC so the first plan in a project gets TP-001
+$tp_seq_subquery = "
+    (SELECT COUNT(*) + 1
+     FROM test_plans tp2
+     WHERE tp2.project_id = tp.project_id
+       AND (tp2.created_at < tp.created_at
+            OR (tp2.created_at = tp.created_at AND tp2.id < tp.id))
+    ) AS tp_seq
+";
+
+// ── Only fetch data when filters are applied ──
+// No filter = blank table with "Apply filters" message
+if ($filters_applied && !empty($whereStr)) {
     $cstmt = $conn->prepare("SELECT COUNT(*) FROM test_plans tp LEFT JOIN projects p ON p.id=tp.project_id $whereStr");
     if ($bind_types !== '') $cstmt->bind_param($bind_types, ...$bind_params);
     $cstmt->execute();
@@ -401,7 +470,7 @@ if (!empty($whereStr)) {
     $qparams[] = $offset;
 
     $stmt = $conn->prepare(
-        "SELECT tp.*, p.name AS project_name, pl.name AS project_lead_name, tl.name AS test_lead_name
+        "SELECT tp.*, $tp_seq_subquery, p.name AS project_name, pl.name AS project_lead_name, tl.name AS test_lead_name
          FROM test_plans tp
          LEFT JOIN projects p  ON p.id  = tp.project_id
          LEFT JOIN users pl    ON pl.id = tp.project_lead_id
@@ -410,36 +479,6 @@ if (!empty($whereStr)) {
          ORDER BY tp.created_at DESC LIMIT ? OFFSET ?"
     );
     $stmt->bind_param($qtypes, ...$qparams);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        $row['testing_types'] = json_decode($row['testing_types'] ?? '[]', true);
-        $row['technologies']  = json_decode($row['technologies']  ?? '[]', true);
-        $test_plans[] = $row;
-    }
-    $stmt->close();
-} else {
-    // No filters — show assigned projects' test plans (handled by base_where above which always has project IN)
-    // This case shouldn't normally be reached since we always add a WHERE clause
-    $cstmt = $conn->prepare("SELECT COUNT(*) FROM test_plans tp LEFT JOIN projects p ON p.id=tp.project_id");
-    $cstmt->execute();
-    $cstmt->bind_result($total);
-    $cstmt->fetch();
-    $cstmt->close();
-
-    $total_pages = max(1, ceil($total / $per_page));
-    $page        = max(1, min((int)($_GET['page'] ?? 1), $total_pages));
-    $offset      = ($page - 1) * $per_page;
-
-    $stmt = $conn->prepare(
-        "SELECT tp.*, p.name AS project_name, pl.name AS project_lead_name, tl.name AS test_lead_name
-         FROM test_plans tp
-         LEFT JOIN projects p  ON p.id  = tp.project_id
-         LEFT JOIN users pl    ON pl.id = tp.project_lead_id
-         LEFT JOIN users tl    ON tl.id = tp.test_lead_id
-         ORDER BY tp.created_at DESC LIMIT ? OFFSET ?"
-    );
-    $stmt->bind_param('ii', $per_page, $offset);
     $stmt->execute();
     $result = $stmt->get_result();
     while ($row = $result->fetch_assoc()) {
@@ -462,6 +501,13 @@ $all_projects_json = json_encode($projects_list);
 
 // Build assigned projects JSON for modal dropdown
 $assigned_projects_json = json_encode($assigned_projects_list);
+
+// ── Build project-wise TP ID lookup for JS ──
+$tp_id_map = [];
+foreach ($test_plans as $tp) {
+    $tp_id_map[(int)$tp['id']] = 'TP-' . str_pad($tp['tp_seq'], 3, '0', STR_PAD_LEFT);
+}
+$tp_id_map_json = json_encode($tp_id_map);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -594,6 +640,10 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 .obj-desc { font-size:11.5px; color:var(--text-muted); max-width:200px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .proj-name { font-weight:700; color:var(--purple); font-size:13px; }
 
+/* ══ TP ID BADGE ══ */
+.tp-id-badge { display:inline-flex; align-items:center; gap:5px; background:linear-gradient(135deg,#e8f0fd,#d4e4f7); color:var(--blue-dark); font-family:'Nunito',sans-serif; font-weight:800; font-size:12px; padding:4px 10px; border-radius:8px; border:1px solid #bdd4f0; letter-spacing:.5px; white-space:nowrap; }
+.tp-id-badge svg { width:12px; height:12px; opacity:.6; }
+
 /* ══ BADGES / CHIPS ══ */
 .badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; white-space:nowrap; margin-right:4px; margin-bottom:4px; }
 .badge-blue   { background:linear-gradient(135deg,#e3f2fd,#d4e4f7); color:#1565c0; border:1px solid #bdd4f0; }
@@ -614,7 +664,10 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 .empty-state { text-align:center; padding:50px 20px; color:var(--text-muted); }
 .empty-state svg { width:48px; height:48px; margin-bottom:12px; color:#c5d5e8; }
 .empty-state p { font-size:14px; font-weight:600; }
-.empty-state small { font-size:12.5px; }
+.empty-state small { font-size:12.5px; display:block; margin-top:4px; }
+.empty-state.nofilter svg { width:56px; height:56px; color:#b0bdd6; }
+.empty-state.nofilter p { font-size:16px; font-weight:700; color:var(--text-main); }
+.empty-state.nofilter small { font-size:13px; color:var(--text-muted); }
 
 /* ══ PAGINATION ══ */
 .table-footer { padding:13px 20px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; font-size:12.5px; color:var(--text-muted); font-weight:600; }
@@ -735,6 +788,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
   .badge { font-size:10.5px; padding:2px 8px; }
   .btn-icon { width:32px; height:32px; border-radius:8px; }
   .btn-icon svg { width:12px; height:12px; }
+  .tp-id-badge { font-size:11px; padding:3px 8px; }
   .form-row { grid-template-columns:1fr; gap:0; }
   .check-grid { grid-template-columns:1fr 1fr; gap:8px; }
   .modal { max-height:85vh; width:95%; }
@@ -780,6 +834,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
   .badge { font-size:10px; padding:2px 6px; border-radius:14px; }
   .btn-icon { width:30px; height:30px; border-radius:8px; }
   .btn-icon svg { width:12px; height:12px; }
+  .tp-id-badge { font-size:10px; padding:2px 6px; }
   .modal { max-width:100%; max-height:90vh; border-radius:16px; }
   .modal-header { padding:16px 14px 12px; }
   .modal-header h2 { font-size:15px; }
@@ -838,6 +893,10 @@ textarea.form-control { resize:vertical; min-height:80px; }
     Home
   </a>
   <div class="sb-section">Pages</div>
+  <a href="../user_page/u_client.php" class="sb-link">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+    Clients
+  </a>
   <a href="../user_page/u_project.php" class="sb-link">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
     My Projects
@@ -871,8 +930,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
   <!-- TOOLBAR -->
   <div class="toolbar">
     <div class="toolbar-left">
-      <?php if (!$filters_applied): ?>
-      <form method="GET" action="" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <form method="GET" action="" id="filterForm" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <div class="search-wrap">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="text" name="search" class="search-input" placeholder="Search..." value="<?= htmlspecialchars($search) ?>">
@@ -885,35 +943,21 @@ textarea.form-control { resize:vertical; min-height:80px; }
         </select>
         <select name="filter_project" class="filter-select" id="filterProject" onchange="checkFormState()">
             <option value="">All Projects</option>
+            <?php foreach ($projects_list as $p): ?>
+                <option value="<?= $p['id'] ?>" <?= $filter_project == $p['id'] ? 'selected' : '' ?>><?= htmlspecialchars($p['name']) ?></option>
+            <?php endforeach; ?>
         </select>
         <button type="submit" class="btn-filter">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
           Apply Filter
         </button>
-      </form>
-      <?php else: ?>
-      <div class="active-filter-bar">
-        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-        <span>Filters active:</span>
-        <?php
-          if ($filter_client) {
-              foreach ($clients_list as $c) {
-                  if ($c['id'] == $filter_client) echo '<span class="filter-tag">Client: ' . htmlspecialchars($c['name']) . '</span>';
-              }
-          }
-          if ($filter_project) {
-              foreach ($projects_list as $p) {
-                  if ($p['id'] == $filter_project) echo '<span class="filter-tag">Project: ' . htmlspecialchars($p['name']) . '</span>';
-              }
-          }
-          if ($search) echo '<span class="filter-tag">Search: "' . htmlspecialchars($search) . '"</span>';
-        ?>
+        <?php if ($filters_applied): ?>
         <a href="?" class="btn-clear-active">
           <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           Clear
         </a>
-      </div>
-      <?php endif; ?>
+        <?php endif; ?>
+      </form>
     </div>
     <div class="toolbar-right">
       <button type="button" class="btn-template" onclick="downloadTemplate()">
@@ -931,6 +975,28 @@ textarea.form-control { resize:vertical; min-height:80px; }
     </div>
   </div>
 
+  <?php if ($filters_applied): ?>
+  <!-- ACTIVE FILTER TAGS -->
+  <div class="active-filter-bar" style="margin-bottom:14px;">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+    <span>Active Filters:</span>
+    <?php
+      if ($filter_client) {
+          foreach ($clients_list as $c) {
+              if ($c['id'] == $filter_client) echo '<span class="filter-tag">Client: ' . htmlspecialchars($c['name']) . '</span>';
+          }
+      }
+      if ($filter_project) {
+          foreach ($projects_list as $p) {
+              if ($p['id'] == $filter_project) echo '<span class="filter-tag">Project: ' . htmlspecialchars($p['name']) . '</span>';
+          }
+      }
+      if ($search) echo '<span class="filter-tag">Search: "' . htmlspecialchars($search) . '"</span>';
+    ?>
+    <span style="margin-left:auto; font-size:12px; color:var(--text-muted);"><?= $total ?> result(s)</span>
+  </div>
+  <?php endif; ?>
+
   <!-- TABLE -->
   <div class="table-card">
     <div class="table-wrap">
@@ -938,7 +1004,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
         <thead>
           <tr>
             <th>S.No.</th>
-            <th>Test Plan ID</th>
+            <th>TP ID</th>
             <th>Project Name</th>
             <th>Title</th>
             <th>Objective</th>
@@ -953,18 +1019,31 @@ textarea.form-control { resize:vertical; min-height:80px; }
         <tbody>
           <?php if (empty($test_plans)): ?>
           <tr><td colspan="11">
-            <div class="empty-state">
+            <div class="empty-state<?= !$filters_applied ? ' nofilter' : '' ?>">
+              <?php if (!$filters_applied): ?>
+              <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+              <p>Apply filters to view Test Plans</p>
+              <small>Select a Client or Project above and click "Apply Filter"</small>
+              <?php else: ?>
               <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
-              <p>No Test Plans found. <?php if (empty($user_assigned_project_ids)): ?>You have no assigned projects.<?php else: ?>Apply filters or add one.<?php endif; ?></p>
+              <p>No Test Plans found matching your filters.</p>
+              <small>Try changing the filters or click "Clear" to reset.</small>
+              <?php endif; ?>
             </div>
           </td></tr>
           <?php else: ?>
             <?php $sn = ($page - 1) * 10 + 1; foreach ($test_plans as $tp):
               $is_assigned = in_array((int)$tp['project_id'], $user_assigned_project_ids);
+              $tp_display_id = 'TP-' . str_pad($tp['tp_seq'], 3, '0', STR_PAD_LEFT);
             ?>
             <tr>
               <td><?= $sn++ ?></td>
-              <td><strong>TP-00<?= $tp['id'] ?></strong></td>
+              <td>
+                <span class="tp-id-badge">
+                  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+                  <?= htmlspecialchars($tp_display_id) ?>
+                </span>
+              </td>
               <td><div class="proj-name"><?= htmlspecialchars($tp['project_name'] ?? '—') ?></div></td>
               <td><div class="req-title"><?= htmlspecialchars($tp['title']) ?></div></td>
               <td><div class="obj-desc"><?= htmlspecialchars(substr($tp['objective'], 0, 100)) ?>...</div></td>
@@ -1215,6 +1294,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
 const allowedProjectIds = <?= $allowed_project_ids_json ?>;
 const allProjects = <?= $all_projects_json ?>;
 const assignedProjects = <?= $assigned_projects_json ?>;
+const tpIdMap = <?= $tp_id_map_json ?>;
 
 function isProjectAllowed(pid) {
     return allowedProjectIds.includes(Number(pid));
@@ -1252,9 +1332,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 100);
     }
 
-    // Initialize filter project dropdown
-    const filterClientVal = document.getElementById('filterClient').value;
-    if (filterClientVal) updateProjectDropdown(filterClientVal);
+    // Project dropdown is already populated by PHP — no need to overwrite on load.
+    // Only filter when client changes via onchange="updateProjectDropdown(this.value)"
 
     // Toast auto-hide
     const toastEl = document.getElementById('toastEl');
@@ -1285,7 +1364,7 @@ function closeSidebar() {
 }
 
 // ═══════════════════════════════════════════════════════
-//  FILTER DROPDOWNS — uses ALL projects (so user can see all projects under any client)
+//  FILTER DROPDOWNS
 // ═══════════════════════════════════════════════════════
 function updateProjectDropdown(clientId) {
     const projSel = document.getElementById('filterProject');
@@ -1310,7 +1389,7 @@ function checkFormState() {
 }
 
 // ═══════════════════════════════════════════════════════
-//  MODAL — PROJECT FIELD (uses ASSIGNED projects only for add/edit)
+//  MODAL — PROJECT FIELD
 // ═══════════════════════════════════════════════════════
 let modalProjectLocked = false;
 
@@ -1333,7 +1412,6 @@ function populateModalProjectDropdown(selectedId) {
     const sel = document.getElementById('pProjectSelect');
     sel.innerHTML = '<option value="">Select Project</option>';
 
-    // Use ASSIGNED projects only for modal dropdown
     assignedProjects.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.id;
@@ -1358,7 +1436,6 @@ function populateImportDropdown() {
     const sel = document.getElementById('importProjectSelect');
     sel.innerHTML = '<option value="">Select Project</option>';
 
-    // Use ASSIGNED projects only for import
     assignedProjects.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.id;
@@ -1379,7 +1456,6 @@ function openAddModal() {
     unlockProject();
     populateModalProjectDropdown('');
 
-    // Clear checkboxes
     document.querySelectorAll('#planForm input[type="checkbox"]').forEach(cb => cb.checked = false);
 
     document.getElementById('modal-overlay').classList.add('open');
@@ -1398,28 +1474,23 @@ function openEditModal(tp) {
     document.getElementById('eRoles').value = tp.roles_covered || '';
     document.getElementById('customTechList').innerHTML = '';
 
-    // Check if user is assigned to this project
     if (!isProjectAllowed(tp.project_id)) {
         showToast('You can only edit test plans for your assigned projects.', 'error');
         return;
     }
 
-    // Lock project for edit
     lockProject(tp.project_id, tp.project_name || 'Project #' + tp.project_id);
 
-    // Checkboxes — testing types
     document.querySelectorAll('#planForm input[name="testing_types[]"]').forEach(cb => {
         cb.checked = Array.isArray(tp.testing_types) && tp.testing_types.includes(cb.value);
     });
 
-    // Checkboxes — technologies
     const techVals = Array.isArray(tp.technologies) ? tp.technologies : [];
     const predefinedTechs = ['MySQL','WordPress','Codeigniter','Postgre SQL','React','NodeJS'];
     document.querySelectorAll('#planForm input[name="technologies[]"]').forEach(cb => {
         cb.checked = techVals.includes(cb.value);
     });
 
-    // Custom tech elements
     techVals.forEach(t => {
         if (!predefinedTechs.includes(t)) {
             addCustomTechElement(t);
@@ -1446,7 +1517,6 @@ document.getElementById('techSelect').addEventListener('change', function() {
 
 function addCustomTechElement(name) {
     const container = document.getElementById('customTechList');
-    // Prevent duplicates
     const existing = container.querySelectorAll('input[type="hidden"]');
     for (let i = 0; i < existing.length; i++) {
         if (existing[i].value === name) return;

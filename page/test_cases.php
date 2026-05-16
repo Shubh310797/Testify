@@ -599,18 +599,16 @@ function generate_row_html($d, $sn='-') {
 
     if (count($scr) > 0) {
         $scrCount = count($scr);
-        $scBtn = "<button class='btn-sc' onclick=\"openScr($scrJson)\">
-            <svg width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' style='margin-right:4px'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>
-            $scrCount</button>";
+        $scrSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+        $scBtn = "<button class='btn-sc' onclick=\"openScr($scrJson)\">{$scrSvg}$scrCount</button>";
     } else {
         $scBtn = '<span class="dash-val">—</span>';
     }
 
     if (count($vids) > 0) {
         $vidCount = count($vids);
-        $vBtn = "<button class='btn-sc vbtn' onclick=\"openVid($vidJson)\">
-            <svg width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' style='margin-right:4px'><polygon points='5 3 19 12 5 21 5 3'/></svg>
-            $vidCount</button>";
+        $vidSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+        $vBtn = "<button class='btn-sc vbtn' onclick=\"openVid($vidJson)\">{$vidSvg}$vidCount</button>";
     } else {
         $vBtn = '<span class="dash-val">—</span>';
     }
@@ -658,10 +656,13 @@ function generate_row_html($d, $sn='-') {
         $createdCell = '<span class="dash-val">—</span>';
     }
 
+    $tcIconSvg = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+    $editIconSvg = '<svg fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+
     return "
     <tr data-id='$id'>
         <td>$sn</td>
-        <td class='tc-id'>$tcId</td>
+        <td class='tc-id'><span class='tc-id-badge'>{$tcIconSvg}$tcId</span></td>
         <td><span class='tc-title' onclick='openDetailModal($dj)'>$title_esc</span></td>
         <td class='hide-mobile'>$page_name</td>
         <td class='hide-mobile'>$category</td>
@@ -673,7 +674,7 @@ function generate_row_html($d, $sn='-') {
         <td class='hide-mobile'>$createdCell</td>
         <td>$scBtn</td><td>$vBtn</td>
         <td><button class='btn-icon' onclick='openEditModal($dj)' title='Edit'>
-            <svg fill='none' stroke='currentColor' stroke-width='2' width='14' height='14' viewBox='0 0 24 24'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>
+            {$editIconSvg}
         </button></td>
     </tr>";
 }
@@ -688,7 +689,8 @@ function spill($cur, $id, $type, $opts) {
         $chk = ($o===$cur) ? '<span class="pchk">&#10003;</span>' : '';
         $items.="<div class='pdi' onclick=\"{$fn}(this,{$id},'{$o}')\"><span class='pdd {$dc}'></span>".htmlspecialchars($o)."$chk</div>";
     }
-    return "<div class='pw'><span class='sp $cls' onclick='tpd(event,this)'>".htmlspecialchars($cur)."<svg width='9' height='9' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3'><polyline points='6 9 12 15 18 9'/></svg></span><div class='pd'>$items</div></div>";
+    $chevronSvg = '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>';
+    return "<div class='pw'><span class='sp $cls' onclick='tpd(event,this)'>".htmlspecialchars($cur).$chevronSvg."</span><div class='pd'>$items</div></div>";
 }
 ?>
 <!DOCTYPE html>
@@ -697,9 +699,59 @@ function spill($cur, $id, $type, $opts) {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>TestiFy — Test Cases</title>
-<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="../css/a_test_case.css"/>
+<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
+<style>
+/* ══ TC ID BADGE — Same design as TP ID badge ══ */
+.tc-id-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: linear-gradient(135deg, #e8f0fd, #d4e4f7);
+  color: #3a7bd5;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid #bdd4f0;
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+.tc-id-badge svg {
+  width: 12px;
+  height: 12px;
+  opacity: .6;
+}
+/* Detail modal TC ID badge (larger) */
+.db-id-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #e8f0fd, #d4e4f7);
+  color: #3a7bd5;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 14px;
+  padding: 5px 14px;
+  border-radius: 10px;
+  border: 1px solid #bdd4f0;
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+.db-id-badge svg {
+  width: 14px;
+  height: 14px;
+  opacity: .6;
+}
+@media (max-width: 768px) {
+  .tc-id-badge { font-size: 11px; padding: 3px 8px; }
+}
+@media (max-width: 480px) {
+  .tc-id-badge { font-size: 10px; padding: 2px 6px; }
+}
+</style>
 </head>
 <body>
 
@@ -1206,7 +1258,7 @@ function openDetailModal(d){
   document.getElementById('detTitle').textContent=(d.tc_custom_id||'TC-'+d.id);
   document.getElementById('detBody').innerHTML=`
   <div class="dbanner">
-    <div class="db-id">${e(d.tc_custom_id||'TC-'+d.id)}</div>
+    <div class="db-id-badge"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:14px;height:14px;opacity:.6"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>${e(d.tc_custom_id||'TC-'+d.id)}</div>
     <div class="db-title">${e(d.title)}</div>
     <div class="db-meta">
       ${d.page_name?`<span class="db-chip">${e(d.page_name)}</span>`:''}

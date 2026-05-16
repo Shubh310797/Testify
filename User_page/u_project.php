@@ -92,31 +92,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action_form'] ?? '') === '
             $new_pid = $conn->insert_id;
             $stmt->close();
 
-            // Insert junction tables
-            foreach ($fe_devs as $uid) {
-                $uid = (int)$uid;
-                $conn->query("INSERT IGNORE INTO project_frontend_devs (project_id, user_id) VALUES ($new_pid, $uid)");
-            }
-            foreach ($be_devs as $uid) {
-                $uid = (int)$uid;
-                $conn->query("INSERT IGNORE INTO project_backend_devs (project_id, user_id) VALUES ($new_pid, $uid)");
-            }
-            foreach ($qa_team as $uid) {
-                $uid = (int)$uid;
-                $conn->query("INSERT IGNORE INTO project_qa_team (project_id, user_id) VALUES ($new_pid, $uid)");
-            }
-            foreach ($fe_tech as $tid) {
-                $tid = (int)$tid;
-                $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($new_pid, $tid, 'frontend')");
-            }
-            foreach ($be_tech as $tid) {
-                $tid = (int)$tid;
-                $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($new_pid, $tid, 'backend')");
-            }
-            foreach ($other_tech as $tid) {
-                $tid = (int)$tid;
-                $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($new_pid, $tid, 'other')");
-            }
+            foreach ($fe_devs as $uid) { $uid = (int)$uid; $conn->query("INSERT IGNORE INTO project_frontend_devs (project_id, user_id) VALUES ($new_pid, $uid)"); }
+            foreach ($be_devs as $uid) { $uid = (int)$uid; $conn->query("INSERT IGNORE INTO project_backend_devs (project_id, user_id) VALUES ($new_pid, $uid)"); }
+            foreach ($qa_team as $uid) { $uid = (int)$uid; $conn->query("INSERT IGNORE INTO project_qa_team (project_id, user_id) VALUES ($new_pid, $uid)"); }
+            foreach ($fe_tech as $tid) { $tid = (int)$tid; $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($new_pid, $tid, 'frontend')"); }
+            foreach ($be_tech as $tid) { $tid = (int)$tid; $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($new_pid, $tid, 'backend')"); }
+            foreach ($other_tech as $tid) { $tid = (int)$tid; $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($new_pid, $tid, 'other')"); }
 
             if (isset($_POST['ajax'])) {
                 header('Content-Type: application/json');
@@ -140,36 +121,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action_form'] ?? '') === '
         if ($stmt->execute()) {
             $stmt->close();
 
-            // Delete old junction entries and insert new ones
             $conn->query("DELETE FROM project_frontend_devs WHERE project_id = $pid");
             $conn->query("DELETE FROM project_backend_devs WHERE project_id = $pid");
             $conn->query("DELETE FROM project_qa_team WHERE project_id = $pid");
             $conn->query("DELETE FROM project_technologies WHERE project_id = $pid");
 
-            foreach ($fe_devs as $uid) {
-                $uid = (int)$uid;
-                $conn->query("INSERT IGNORE INTO project_frontend_devs (project_id, user_id) VALUES ($pid, $uid)");
-            }
-            foreach ($be_devs as $uid) {
-                $uid = (int)$uid;
-                $conn->query("INSERT IGNORE INTO project_backend_devs (project_id, user_id) VALUES ($pid, $uid)");
-            }
-            foreach ($qa_team as $uid) {
-                $uid = (int)$uid;
-                $conn->query("INSERT IGNORE INTO project_qa_team (project_id, user_id) VALUES ($pid, $uid)");
-            }
-            foreach ($fe_tech as $tid) {
-                $tid = (int)$tid;
-                $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($pid, $tid, 'frontend')");
-            }
-            foreach ($be_tech as $tid) {
-                $tid = (int)$tid;
-                $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($pid, $tid, 'backend')");
-            }
-            foreach ($other_tech as $tid) {
-                $tid = (int)$tid;
-                $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($pid, $tid, 'other')");
-            }
+            foreach ($fe_devs as $uid) { $uid = (int)$uid; $conn->query("INSERT IGNORE INTO project_frontend_devs (project_id, user_id) VALUES ($pid, $uid)"); }
+            foreach ($be_devs as $uid) { $uid = (int)$uid; $conn->query("INSERT IGNORE INTO project_backend_devs (project_id, user_id) VALUES ($pid, $uid)"); }
+            foreach ($qa_team as $uid) { $uid = (int)$uid; $conn->query("INSERT IGNORE INTO project_qa_team (project_id, user_id) VALUES ($pid, $uid)"); }
+            foreach ($fe_tech as $tid) { $tid = (int)$tid; $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($pid, $tid, 'frontend')"); }
+            foreach ($be_tech as $tid) { $tid = (int)$tid; $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($pid, $tid, 'backend')"); }
+            foreach ($other_tech as $tid) { $tid = (int)$tid; $conn->query("INSERT IGNORE INTO project_technologies (project_id, tech_id, tech_role) VALUES ($pid, $tid, 'other')"); }
 
             if (isset($_POST['ajax'])) {
                 header('Content-Type: application/json');
@@ -392,7 +354,6 @@ if ($current_user_id && $total_count > 0) {
             else                                      $row['tech_other'][] = $t['name'];
         }
 
-        // Detect current user's role in this project
         $roleCheck = $conn->query("
             SELECT
               (SELECT COUNT(*) FROM project_frontend_devs WHERE project_id=$pid AND user_id=$current_user_id) as is_fe,
@@ -414,7 +375,6 @@ if ($current_user_id && $total_count > 0) {
 
  $conn->close();
 
-// ── Helpers ──
 function status_class(string $s): string {
     return match($s) {
         'In Progress' => 'badge-progress',
@@ -452,12 +412,8 @@ function my_role_badges(array $roles): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>TestiFy — My Projects</title>
 <link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
-
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
 <style>
-/* ═══════════════════════════════════════════════════════════════
-   COLORFUL THEME — Matches Admin Project Page Style
-   ═══════════════════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -481,7 +437,6 @@ function my_role_badges(array $roles): string {
 
 body { min-height:100vh; background:var(--bg); font-family:'Nunito',sans-serif; color:var(--text-main); overflow-x:hidden; }
 
-/* ══ NAVBAR ══ */
 .navbar { background:linear-gradient(90deg,#ffffff,#f8faff); border-bottom:2px solid transparent; border-image:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid),var(--orange)) 1; display:flex; align-items:center; justify-content:space-between; padding:0 20px; height:var(--nb-h); position:fixed; top:0; left:0; right:0; z-index:300; box-shadow:0 2px 20px rgba(74,144,217,.1); }
 .nblogo { font-family:'Poppins',sans-serif; font-weight:800; font-size:22px; background:linear-gradient(135deg,var(--blue-dark),var(--purple-mid),var(--orange)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-decoration:none; white-space:nowrap; display:flex; align-items:center; gap:10px; }
 
@@ -498,10 +453,9 @@ body { min-height:100vh; background:var(--bg); font-family:'Nunito',sans-serif; 
 .blgout { padding:7px 16px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--red),#c0392b); color:#fff; text-decoration:none; font-weight:700; font-size:13px; white-space:nowrap; transition:.2s; box-shadow:0 2px 10px rgba(231,76,60,.2); }
 .blgout:hover { box-shadow:0 4px 18px rgba(231,76,60,.35); transform:translateY(-1px); }
 
-/* ══ SIDEBAR ══ */
 .sidebar { position:fixed; top:var(--nb-h); left:0; bottom:0; width:var(--sb-w); background:linear-gradient(180deg,#ffffff,#f8faff); border-right:1.5px solid var(--border); z-index:250; overflow-y:auto; overflow-x:hidden; transition:transform .28s cubic-bezier(.4,0,.2,1); box-shadow:2px 0 20px rgba(74,144,217,.06); padding-bottom:24px; }
-.sidebar-overlay { display:none; position:fixed; inset:0; top:var(--nb-h); background:rgba(30,45,80,.4); z-index:240; backdrop-filter:blur(2px); }
-.sidebar-overlay.open { display:block; }
+.sidebar-overlay { display:none; position:fixed; inset:0; top:var(--nb-h); background:rgba(30,45,80,.4); z-index:240; backdrop-filter:blur(2px); opacity:0; transition:opacity .25s ease; }
+.sidebar-overlay.open { display:block; opacity:1; }
 
 .sb-section { padding:18px 14px 6px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
 .sb-link { display:flex; align-items:center; gap:10px; padding:9px 16px; margin:1px 8px; border-radius:10px; text-decoration:none; color:var(--text-main); font-size:13.5px; font-weight:600; transition:.15s; position:relative; }
@@ -515,16 +469,13 @@ body { min-height:100vh; background:var(--bg); font-family:'Nunito',sans-serif; 
 .sb-home:hover { background:#eef4fd; color:var(--blue-dark); }
 .sb-home svg { width:16px; height:16px; opacity:.7; }
 
-/* ══ LAYOUT WRAP ══ */
 .page-wrap { margin-left:var(--sb-w); margin-top:var(--nb-h); min-height:calc(100vh - var(--nb-h)); transition:margin-left .28s cubic-bezier(.4,0,.2,1); }
 
-/* ══ MAIN CONTENT ══ */
 .main { max-width:1400px; margin:0 auto; padding:28px 24px 60px; }
 .page-title { display:flex; align-items:center; gap:12px; margin-bottom:22px; flex-wrap:wrap; }
 .page-title h1 { font-family:'Poppins',sans-serif; font-weight:800; font-size:26px; background:linear-gradient(135deg,var(--blue-dark),var(--purple)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; letter-spacing:-.5px; }
 .badge-page { background:linear-gradient(135deg,var(--blue-dark),var(--purple-mid)); color:#fff; font-family:'Poppins',sans-serif; font-weight:700; font-size:10px; letter-spacing:2px; text-transform:uppercase; padding:5px 14px; border-radius:8px; box-shadow:0 2px 10px rgba(142,68,173,.25); }
 
-/* ══ TOOLBAR ══ */
 .toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; flex-wrap:wrap; }
 .toolbar-left { display:flex; align-items:center; gap:12px; flex:1; flex-wrap:wrap; }
 
@@ -536,35 +487,19 @@ body { min-height:100vh; background:var(--bg); font-family:'Nunito',sans-serif; 
 .btn-clear { display:inline-flex; align-items:center; gap:4px; padding:0 12px; border-radius:10px; border:1.5px solid var(--border); background:var(--white); font-family:'Nunito',sans-serif; font-size:13px; font-weight:700; color:var(--text-muted); text-decoration:none; height:38px; flex-shrink:0; transition:background .15s; }
 .btn-clear:hover { background:#f0f5fd; }
 
-/* ══ ADD PROJECT BUTTON ══ */
 .btn-add { padding:9px 20px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--green),var(--green-mid)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:opacity .2s,transform .15s,box-shadow .2s; box-shadow:0 4px 14px rgba(39,174,96,.3); white-space:nowrap; margin-left:auto; flex-shrink:0; }
 .btn-add:hover { opacity:.92; transform:translateY(-2px); box-shadow:0 8px 22px rgba(39,174,96,.38); }
 .btn-add svg { width:15px; height:15px; }
 
-/* ══ ACTION BUTTONS ══ */
 .action-btns { display:flex; gap:6px; flex-wrap:nowrap; }
 .btn-icon { width:34px; height:34px; border-radius:10px; border:1.5px solid var(--border); background:var(--white); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .15s; flex-shrink:0; text-decoration:none; }
 .btn-icon svg { width:14px; height:14px; }
 .btn-icon.edit { color:var(--blue-mid); }
 .btn-icon.edit:hover { background:linear-gradient(135deg,#eef4fd,#d4e4f7); border-color:var(--blue-mid); transform:translateY(-2px); box-shadow:0 3px 10px rgba(58,123,213,.2); }
 
-/* ══ QA ACCESS DENIED BANNER ══ */
-.qa-notice {
-  background:linear-gradient(135deg,#fff3e0,#ffe0b2);
-  border:1.5px solid #ffe0b2;
-  border-radius:12px;
-  padding:14px 18px;
-  margin-bottom:18px;
-  display:flex;
-  align-items:center;
-  gap:12px;
-  font-size:13px;
-  font-weight:700;
-  color:#e65100;
-}
-.qa-notice svg { width:22px; height:22px; flex-shrink:0; }
+.read-only-badge { display:inline-flex; align-items:center; gap:6px; padding:5px 14px; border-radius:20px; font-size:12px; font-weight:800; letter-spacing:.5px; background:linear-gradient(135deg,#f3e5f5,#e8d5f5); color:#7c3aed; border:1.5px solid #ce93d8; white-space:nowrap; }
+.read-only-badge svg { width:14px; height:14px; flex-shrink:0; }
 
-/* ══ TABLE CARD ══ */
 .table-card { background:var(--white); border-radius:18px; border:1.5px solid var(--border); box-shadow:0 4px 20px rgba(74,144,217,.07); overflow:hidden; position:relative; }
 .table-card::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid),var(--orange)); border-radius:18px 18px 0 0; z-index:1; }
 .table-wrap { overflow-x:auto; }
@@ -576,53 +511,29 @@ tbody tr:hover { background:linear-gradient(90deg,#f5f8fe,#f8faff); box-shadow:i
 tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 .client-name { font-weight:700; color:var(--text-main); }
 
-/* Badges */
 .badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; letter-spacing:.3px; }
 .badge-notstarted { background:linear-gradient(135deg,#f0f0f0,#e8e8e8); color:#666; border:1px solid #ddd; }
 .badge-progress   { background:linear-gradient(135deg,#fff3e0,#ffe0b2); color:#e65100; border:1px solid #ffe0b2; }
 .badge-done       { background:linear-gradient(135deg,#e8f8f0,#c6f0d6); color:#1e8449; border:1px solid #a9dfbf; }
 
-/* MY ROLE BADGE */
-.my-role-badge {
-  display:inline-flex; align-items:center; gap:5px;
-  padding:4px 10px; border-radius:20px; font-size:11.5px; font-weight:800;
-  letter-spacing:.3px; white-space:nowrap;
-}
+.my-role-badge { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:20px; font-size:11.5px; font-weight:800; letter-spacing:.3px; white-space:nowrap; }
 .role-fe    { background:linear-gradient(135deg,#e3f2fd,#d4e4f7); color:#1565c0; border:1.5px solid #bdd4f0; }
 .role-be    { background:linear-gradient(135deg,#fff3e0,#ffe0b2); color:#e65100; border:1.5px solid #ffe0b2; }
 .role-qa    { background:linear-gradient(135deg,#e8f8f0,#c6f0d6); color:#1e8449; border:1.5px solid #a9dfbf; }
 .role-lead  { background:linear-gradient(135deg,#f3e5f5,#e8d5f5); color:#6a1b9a; border:1.5px solid #ce93d8; }
 .role-qa-lead { background:linear-gradient(135deg,#fce4ec,#f8c8d8); color:#880e4f; border:1.5px solid #f48fb1; }
 
-/* SUMMARY BANNER */
-.summary-banner {
-  background: linear-gradient(135deg, #e8f0fe 0%, #f3e8ff 50%, #f0f7ff 100%);
-  border: 1.5px solid #c5d8f7;
-  border-radius: 14px;
-  padding: 16px 20px;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  position: relative;
-  overflow: hidden;
-}
+.summary-banner { background:linear-gradient(135deg,#e8f0fe 0%,#f3e8ff 50%,#f0f7ff 100%); border:1.5px solid #c5d8f7; border-radius:14px; padding:16px 20px; margin-bottom:20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; position:relative; overflow:hidden; }
 .summary-banner::before { content:''; position:absolute; bottom:0; left:0; right:0; height:3px; background:linear-gradient(90deg,var(--blue-dark),var(--purple-mid),var(--green-mid),var(--orange)); }
 .summary-banner svg { width:28px; height:28px; color:var(--purple-mid); flex-shrink:0; }
 .summary-text { flex:1; }
 .summary-text h3 { font-size:15px; font-weight:800; color:var(--text-main); margin-bottom:3px; }
 .summary-text p  { font-size:13px; color:var(--text-muted); font-weight:600; }
 .summary-stats   { display:flex; gap:16px; flex-wrap:wrap; }
-.stat-pill {
-  background:var(--white); border:1.5px solid var(--border);
-  border-radius:10px; padding:8px 14px; text-align:center;
-  box-shadow:0 2px 8px rgba(74,144,217,.08);
-}
+.stat-pill { background:var(--white); border:1.5px solid var(--border); border-radius:10px; padding:8px 14px; text-align:center; box-shadow:0 2px 8px rgba(74,144,217,.08); }
 .stat-pill .stat-num { font-family:'Poppins',sans-serif; font-weight:800; font-size:18px; color:var(--blue-dark); line-height:1; }
 .stat-pill .stat-lbl { font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }
 
-/* Status Chips */
 .vis-active { background:linear-gradient(135deg,#e8f5e9,#c6f0d6); color:#1e8449; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; border:1px solid #a9dfbf; }
 .vis-inactive { background:linear-gradient(135deg,#fde8e8,#f9cccc); color:#c0392b; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; border:1px solid #f5b7b1; }
 
@@ -633,13 +544,11 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 .chip-green  { background:linear-gradient(135deg,#e8f8f0,#c6f0d6); color:#1e8449; border:1px solid #a9dfbf; }
 .chip-gray   { background:linear-gradient(135deg,#f5f5f5,#eee); color:#616161; border:1px solid #ddd; }
 
-/* Empty State */
 .empty-state { text-align:center; padding:50px 20px; color:var(--text-muted); }
 .empty-state svg { width:48px; height:48px; margin-bottom:12px; color:#c5d5e8; }
 .empty-state p { font-size:14px; font-weight:600; }
 .empty-state .sub { font-size:12px; margin-top:4px; }
 
-/* Pagination */
 .table-footer { padding:13px 20px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; font-size:12.5px; color:var(--text-muted); font-weight:600; }
 .footer-count { font-size:12.5px; color:var(--text-muted); font-weight:600; }
 .pg-nav { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
@@ -649,9 +558,6 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 .pg-btn.disabled { opacity:.4; cursor:default; pointer-events:none; }
 .pg-btn svg { width:14px; height:14px; }
 
-/* ═══════════════════════════════════════════════════════
-   MODAL & FORMS
-   ═══════════════════════════════════════════════════════ */
 .modal-overlay { display:none; position:fixed; inset:0; background:rgba(30,45,80,.45); backdrop-filter:blur(3px); z-index:500; align-items:center; justify-content:center; padding:16px; }
 .modal-overlay.open { display:flex; }
 .modal { background:var(--white); border-radius:20px; width:100%; max-width:620px; box-shadow:0 24px 64px rgba(30,45,80,.22); overflow:hidden; display:flex; flex-direction:column; position:relative; }
@@ -681,34 +587,13 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 .form-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 .form-row-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
 
-/* Custom Checkbox List for Devs */
-.dev-check-group {
-  border:1.5px solid var(--border);
-  border-radius:10px;
-  padding:12px;
-  background:linear-gradient(135deg,#f8faff,#f0f4ff);
-  max-height:180px;
-  overflow-y:auto;
-}
-.dev-check-item {
-  display:flex;
-  align-items:center;
-  padding:6px 8px;
-  border-radius:8px;
-  transition:background .15s;
-  cursor:pointer;
-}
+.dev-check-group { border:1.5px solid var(--border); border-radius:10px; padding:12px; background:linear-gradient(135deg,#f8faff,#f0f4ff); max-height:180px; overflow-y:auto; }
+.dev-check-item { display:flex; align-items:center; padding:6px 8px; border-radius:8px; transition:background .15s; cursor:pointer; }
 .dev-check-item:hover { background:linear-gradient(90deg,#eef4fd,#f0f7ff); }
-.dev-check-item input[type="checkbox"] {
-  width:16px; height:16px;
-  margin-right:10px;
-  cursor:pointer;
-  accent-color:var(--purple-mid);
-}
+.dev-check-item input[type="checkbox"] { width:16px; height:16px; margin-right:10px; cursor:pointer; accent-color:var(--purple-mid); }
 .dev-check-item span { font-size:13px; font-weight:600; color:var(--text-main); }
 .dev-check-sub { font-size:11px; color:var(--text-muted); margin-left:4px; font-weight:400; }
 
-/* Save Button */
 .btn-save { padding:10px 26px; border-radius:10px; border:none; background:linear-gradient(135deg,var(--green),var(--green-mid)); color:#fff; font-family:'Nunito',sans-serif; font-weight:700; font-size:14px; cursor:pointer; transition:opacity .2s,transform .15s,box-shadow .2s; box-shadow:0 4px 14px rgba(39,174,96,.28); display:inline-flex; align-items:center; gap:8px; }
 .btn-save:hover { opacity:.92; transform:translateY(-1px); box-shadow:0 6px 20px rgba(39,174,96,.35); }
 .btn-save svg { width:16px; height:16px; }
@@ -716,7 +601,6 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 .btn-cancel { padding:10px 22px; border-radius:10px; border:1.5px solid var(--border); background:transparent; color:var(--text-muted); font-family:'Nunito',sans-serif; font-weight:700; font-size:14px; cursor:pointer; transition:background .15s,color .15s; }
 .btn-cancel:hover { background:linear-gradient(135deg,#f0f5fd,#eef4fd); color:var(--text-main); }
 
-/* ══ TOAST ══ */
 .toast { position:fixed; bottom:28px; right:28px; z-index:999; display:flex; align-items:center; gap:10px; padding:13px 20px; border-radius:12px; font-size:13.5px; font-weight:700; box-shadow:0 8px 28px rgba(30,45,80,.18); min-width:240px; }
 .toast.success { background:linear-gradient(135deg,#e8f8f0,#c6f0d6); color:#1e8449; border:1.5px solid #a9dfbf; }
 .toast.error   { background:linear-gradient(135deg,#fde8e8,#f9cccc); color:#c0392b; border:1.5px solid #f5b7b1; }
@@ -725,11 +609,10 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-/* RESPONSIVE */
 @media(max-width:768px){
   :root { --sb-w: 260px; }
   .ham { display:flex; }
-  .sidebar { transform:translateX(-100%); }
+  .sidebar { transform:translateX(-100%); width:var(--sb-w); }
   .sidebar.open { transform:translateX(0); }
   .sidebar-overlay.open { display:block; }
   .page-wrap { margin-left:0; }
@@ -738,16 +621,13 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
   .main { padding:16px 14px 48px; }
   .page-title h1 { font-size:20px; }
   .form-row, .form-row-3 { grid-template-columns:1fr; }
-
   .toolbar { flex-direction:column; align-items:stretch; }
   .toolbar-left { flex-direction:column; align-items:stretch; width:100%; }
   .search-wrap { max-width:100%; margin-bottom:12px; }
   .btn-add { width:100%; margin-left:0; margin-top:10px; justify-content:center; padding:12px 20px; }
   .toast { right:14px; bottom:14px; min-width:200px; font-size:12px; }
-
   .modal { max-height:85vh; width:95%; }
   .modal-body { max-height:60vh; padding:16px; }
-
   .table-footer { flex-direction:column; text-align:center; }
   .pg-nav { justify-content:center; }
   .summary-banner { flex-direction:column; text-align:center; }
@@ -779,27 +659,31 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 <!-- SIDEBAR OVERLAY -->
 <div class="sidebar-overlay" id="sbOverlay" onclick="closeSidebar()"></div>
 
-<!-- SIDEBAR -->
+<!-- SIDEBAR — Same as other user pages -->
 <aside class="sidebar" id="sidebar">
   <a href="../dash/user_dash.php" class="sb-home">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
     Home
   </a>
   <div class="sb-section">Pages</div>
+  <a href="../user_page/u_client.php" class="sb-link">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+    Clients
+  </a>
   <a href="../user_page/u_project.php" class="sb-link active">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
     My Projects
   </a>
   <a href="../user_page/u_requirement.php" class="sb-link">
-    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
     Requirements
   </a>
   <a href="../user_page/u_test_plans.php" class="sb-link">
-     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
     Test Plans
   </a>
   <a href="../user_page/u_test_cases.php" class="sb-link">
-   <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
     Test Cases
   </a>
   <a href="../user_page/u_project_reports.php" class="sb-link">
@@ -814,6 +698,9 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
     <div class="page-title">
       <h1>My Projects</h1>
       <span class="badge-page">My Projects</span>
+      <?php if ($is_qa): ?>
+      <span class="read-only-badge"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Read Only</span>
+      <?php endif; ?>
     </div>
 
       <!-- SUMMARY BANNER -->
@@ -862,14 +749,6 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
               <?php endif; ?>
           </div>
       </div>
-
-      <!-- QA ACCESS NOTICE -->
-      <?php if ($is_qa): ?>
-      <div class="qa-notice">
-        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span>You are QA — You can only view projects. Add/Edit access is available only for Developers.</span>
-      </div>
-      <?php endif; ?>
 
       <div class="toolbar">
         <div class="toolbar-left">
@@ -940,60 +819,16 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
                   <td><?= my_role_badges($p['my_roles'] ?? []) ?></td>
                   <td><div class="client-name"><?= htmlspecialchars($p['name']) ?></div></td>
                   <td><?= htmlspecialchars($p['client_name'] ?? '---') ?></td>
-                  <td>
-                    <span class="badge badge-<?= status_class($p['status']) ?>">
-                      <?= htmlspecialchars($p['status']) ?>
-                    </span>
-                  </td>
-                  <td>
-                    <span class="<?= ($p['action'] ?? 'active') === 'active' ? 'vis-active' : 'vis-inactive' ?>">
-                      <?= ucfirst($p['action'] ?? 'active') ?>
-                    </span>
-                  </td>
-                  <td>
-                    <div class="chip-list">
-                      <?php if(!empty($p['fe_devs_names'])): foreach ($p['fe_devs_names'] as $d): ?>
-                        <span class="chip chip-blue"><?= htmlspecialchars($d) ?></span>
-                      <?php endforeach; else: echo '---'; endif; ?>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="chip-list">
-                      <?php if(!empty($p['be_devs_names'])): foreach ($p['be_devs_names'] as $d): ?>
-                        <span class="chip chip-orange"><?= htmlspecialchars($d) ?></span>
-                      <?php endforeach; else: echo '---'; endif; ?>
-                    </div>
-                  </td>
+                  <td><span class="badge badge-<?= status_class($p['status']) ?>"><?= htmlspecialchars($p['status']) ?></span></td>
+                  <td><span class="<?= ($p['action'] ?? 'active') === 'active' ? 'vis-active' : 'vis-inactive' ?>"><?= ucfirst($p['action'] ?? 'active') ?></span></td>
+                  <td><div class="chip-list"><?php if(!empty($p['fe_devs_names'])): foreach ($p['fe_devs_names'] as $d): ?><span class="chip chip-blue"><?= htmlspecialchars($d) ?></span><?php endforeach; else: echo '---'; endif; ?></div></td>
+                  <td><div class="chip-list"><?php if(!empty($p['be_devs_names'])): foreach ($p['be_devs_names'] as $d): ?><span class="chip chip-orange"><?= htmlspecialchars($d) ?></span><?php endforeach; else: echo '---'; endif; ?></div></td>
                   <td><?= htmlspecialchars($p['lead_name'] ?? '---') ?></td>
                   <td><?= htmlspecialchars($p['qa_lead_name'] ?? '---') ?></td>
-                  <td>
-                    <div class="chip-list">
-                      <?php if(!empty($p['qa_names'])): foreach ($p['qa_names'] as $d): ?>
-                        <span class="chip chip-green"><?= htmlspecialchars($d) ?></span>
-                      <?php endforeach; else: echo '---'; endif; ?>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="chip-list">
-                      <?php if(!empty($p['tech_fe'])): foreach ($p['tech_fe'] as $t): ?>
-                        <span class="chip chip-blue"><?= htmlspecialchars($t) ?></span>
-                      <?php endforeach; else: echo '---'; endif; ?>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="chip-list">
-                      <?php if(!empty($p['tech_be'])): foreach ($p['tech_be'] as $t): ?>
-                        <span class="chip chip-orange"><?= htmlspecialchars($t) ?></span>
-                      <?php endforeach; else: echo '---'; endif; ?>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="chip-list">
-                      <?php if(!empty($p['tech_other'])): foreach ($p['tech_other'] as $t): ?>
-                        <span class="chip chip-gray"><?= htmlspecialchars($t) ?></span>
-                      <?php endforeach; else: echo '---'; endif; ?>
-                    </div>
-                  </td>
+                  <td><div class="chip-list"><?php if(!empty($p['qa_names'])): foreach ($p['qa_names'] as $d): ?><span class="chip chip-green"><?= htmlspecialchars($d) ?></span><?php endforeach; else: echo '---'; endif; ?></div></td>
+                  <td><div class="chip-list"><?php if(!empty($p['tech_fe'])): foreach ($p['tech_fe'] as $t): ?><span class="chip chip-blue"><?= htmlspecialchars($t) ?></span><?php endforeach; else: echo '---'; endif; ?></div></td>
+                  <td><div class="chip-list"><?php if(!empty($p['tech_be'])): foreach ($p['tech_be'] as $t): ?><span class="chip chip-orange"><?= htmlspecialchars($t) ?></span><?php endforeach; else: echo '---'; endif; ?></div></td>
+                  <td><div class="chip-list"><?php if(!empty($p['tech_other'])): foreach ($p['tech_other'] as $t): ?><span class="chip chip-gray"><?= htmlspecialchars($t) ?></span><?php endforeach; else: echo '---'; endif; ?></div></td>
                   <td style="font-size:12px;white-space:nowrap;color:var(--text-muted);"><?= fmt_date($p['start_date']) ?></td>
                   <td style="font-size:12px;white-space:nowrap;color:var(--text-muted);"><?= fmt_date($p['deadline_date']) ?></td>
                   <td style="font-size:12px;white-space:nowrap;color:var(--text-muted);"><?= fmt_date($p['delivery_date']) ?></td>
@@ -1013,30 +848,24 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
           </table>
         </div>
 
-        <!-- Pagination -->
         <div class="table-footer">
           <span class="footer-count">
             Total <strong><?= $total_count ?></strong> project<?= $total_count !== 1 ? 's' : '' ?>
-            <?php if ($total_pages > 1): ?>
-              &nbsp;&middot;&nbsp; Page <strong><?= $page ?></strong> of <strong><?= $total_pages ?></strong>
-            <?php endif; ?>
+            <?php if ($total_pages > 1): ?>&nbsp;&middot;&nbsp; Page <strong><?= $page ?></strong> of <strong><?= $total_pages ?></strong><?php endif; ?>
           </span>
           <?php if ($total_pages > 1): ?>
           <div class="pg-nav">
-            <a href="?page=<?= max(1, $page - 1) ?><?= $search ? '&search=' . urlencode($search) : '' ?>"
-               class="pg-btn <?= $page <= 1 ? 'disabled' : '' ?>">
+            <a href="?page=<?= max(1, $page - 1) ?><?= $search ? '&search=' . urlencode($search) : '' ?>" class="pg-btn <?= $page <= 1 ? 'disabled' : '' ?>">
               <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
             </a>
             <?php for ($pg = 1; $pg <= $total_pages; $pg++): ?>
               <?php if ($total_pages > 7 && abs($pg - $page) > 2 && $pg !== 1 && $pg !== $total_pages): ?>
                 <?php if ($pg === 2 || $pg === $total_pages - 1): ?><span style="padding:0 4px;color:var(--text-muted);">&hellip;</span><?php endif; ?>
               <?php else: ?>
-                <a href="?page=<?= $pg ?><?= $search ? '&search=' . urlencode($search) : '' ?>"
-                   class="pg-btn <?= $pg === $page ? 'active' : '' ?>"><?= $pg ?></a>
+                <a href="?page=<?= $pg ?><?= $search ? '&search=' . urlencode($search) : '' ?>" class="pg-btn <?= $pg === $page ? 'active' : '' ?>"><?= $pg ?></a>
               <?php endif; ?>
             <?php endfor; ?>
-            <a href="?page=<?= min($total_pages, $page + 1) ?><?= $search ? '&search=' . urlencode($search) : '' ?>"
-               class="pg-btn <?= $page >= $total_pages ? 'disabled' : '' ?>">
+            <a href="?page=<?= min($total_pages, $page + 1) ?><?= $search ? '&search=' . urlencode($search) : '' ?>" class="pg-btn <?= $page >= $total_pages ? 'disabled' : '' ?>">
               <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
             </a>
           </div>
@@ -1046,9 +875,7 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════
-   MODAL (Add/Edit Project) — DEVELOPERS ONLY — Direct Save
-   ═══════════════════════════════════════════════════════ -->
+<!-- MODAL (Add/Edit Project) — DEVELOPERS ONLY -->
 <?php if ($is_developer): ?>
 <div class="modal-overlay" id="editModal">
   <div class="modal">
@@ -1063,7 +890,6 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
       <input type="hidden" name="edit_id" id="eId"/>
       <input type="hidden" name="ajax" value="1"/>
       <div class="modal-body">
-        <!-- BASIC INFO -->
         <div class="section-label">Basic Info</div>
         <div class="form-row">
           <div class="form-group"><label>Project Name <span>*</span></label><input type="text" id="eName" name="project_name" class="form-control" placeholder="Enter project name"/><div class="field-error-msg" id="errName">Project Name is required</div></div>
@@ -1097,35 +923,20 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
           </div>
         </div>
         <div class="form-row">
-          <div class="form-group">
-            <label>Start Date <span>*</span></label>
-            <input type="date" id="eStartDate" name="start_date" class="form-control"/>
-            <div class="field-error-msg" id="errStartDate">Start Date is required</div>
-          </div>
-          <div class="form-group">
-            <label>Deadline Date</label>
-            <input type="date" id="eDeadlineDate" name="deadline_date" class="form-control"/>
-          </div>
+          <div class="form-group"><label>Start Date <span>*</span></label><input type="date" id="eStartDate" name="start_date" class="form-control"/><div class="field-error-msg" id="errStartDate">Start Date is required</div></div>
+          <div class="form-group"><label>Deadline Date</label><input type="date" id="eDeadlineDate" name="deadline_date" class="form-control"/></div>
         </div>
         <div class="form-row">
-          <div class="form-group">
-            <label>Delivery Date</label>
-            <input type="date" id="eDeliveryDate" name="delivery_date" class="form-control"/>
-          </div>
+          <div class="form-group"><label>Delivery Date</label><input type="date" id="eDeliveryDate" name="delivery_date" class="form-control"/></div>
           <div class="form-group"></div>
         </div>
 
-        <!-- TEAM MEMBERS -->
         <div class="section-label">Team Members</div>
         <div class="form-group">
           <label>Frontend Developers</label>
           <div class="dev-check-group">
             <?php foreach ($developers_list as $u): ?>
-              <label class="dev-check-item">
-                <input type="checkbox" name="fe_devs[]" value="<?= $u['id'] ?>" id="eFeDev_<?= $u['id'] ?>"/>
-                <span><?= htmlspecialchars($u['name']) ?></span>
-                <span class="dev-check-sub">(<?= htmlspecialchars($u['username']) ?>)</span>
-              </label>
+              <label class="dev-check-item"><input type="checkbox" name="fe_devs[]" value="<?= $u['id'] ?>" id="eFeDev_<?= $u['id'] ?>"/><span><?= htmlspecialchars($u['name']) ?></span><span class="dev-check-sub">(<?= htmlspecialchars($u['username']) ?>)</span></label>
             <?php endforeach; ?>
           </div>
         </div>
@@ -1133,29 +944,19 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
           <label>Backend Developers</label>
           <div class="dev-check-group">
             <?php foreach ($developers_list as $u): ?>
-              <label class="dev-check-item">
-                <input type="checkbox" name="be_devs[]" value="<?= $u['id'] ?>" id="eBeDev_<?= $u['id'] ?>"/>
-                <span><?= htmlspecialchars($u['name']) ?></span>
-                <span class="dev-check-sub">(<?= htmlspecialchars($u['username']) ?>)</span>
-              </label>
+              <label class="dev-check-item"><input type="checkbox" name="be_devs[]" value="<?= $u['id'] ?>" id="eBeDev_<?= $u['id'] ?>"/><span><?= htmlspecialchars($u['name']) ?></span><span class="dev-check-sub">(<?= htmlspecialchars($u['username']) ?>)</span></label>
             <?php endforeach; ?>
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label>Project Lead <span>*</span></label>
-            <select name="project_lead" id="eLead" class="form-control">
-              <option value="">Select Project Lead</option>
-              <?php foreach ($leads_list as $u): ?><option value="<?= $u['id'] ?>"><?= htmlspecialchars($u['name']) ?></option><?php endforeach; ?>
-            </select>
+            <select name="project_lead" id="eLead" class="form-control"><option value="">Select Project Lead</option><?php foreach ($leads_list as $u): ?><option value="<?= $u['id'] ?>"><?= htmlspecialchars($u['name']) ?></option><?php endforeach; ?></select>
             <div class="field-error-msg" id="errLead">Project Lead is required</div>
           </div>
           <div class="form-group">
             <label>QA Lead <span>*</span></label>
-            <select name="qa_lead" id="eQaLead" class="form-control">
-              <option value="">Select QA Lead</option>
-              <?php foreach ($testers_list as $u): ?><option value="<?= $u['id'] ?>"><?= htmlspecialchars($u['name']) ?></option><?php endforeach; ?>
-            </select>
+            <select name="qa_lead" id="eQaLead" class="form-control"><option value="">Select QA Lead</option><?php foreach ($testers_list as $u): ?><option value="<?= $u['id'] ?>"><?= htmlspecialchars($u['name']) ?></option><?php endforeach; ?></select>
             <div class="field-error-msg" id="errQaLead">QA Lead is required</div>
           </div>
         </div>
@@ -1163,52 +964,17 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
           <label>QA Team</label>
           <div class="dev-check-group">
             <?php foreach ($testers_list as $u): ?>
-              <label class="dev-check-item">
-                <input type="checkbox" name="qa_team[]" value="<?= $u['id'] ?>" id="eQaDev_<?= $u['id'] ?>"/>
-                <span><?= htmlspecialchars($u['name']) ?></span>
-                <span class="dev-check-sub">(<?= htmlspecialchars($u['username']) ?>)</span>
-              </label>
+              <label class="dev-check-item"><input type="checkbox" name="qa_team[]" value="<?= $u['id'] ?>" id="eQaDev_<?= $u['id'] ?>"/><span><?= htmlspecialchars($u['name']) ?></span><span class="dev-check-sub">(<?= htmlspecialchars($u['username']) ?>)</span></label>
             <?php endforeach; ?>
           </div>
         </div>
 
-        <!-- TECHNOLOGIES -->
         <div class="section-label">Technologies <span style="color:var(--red);-webkit-text-fill-color:var(--red);font-size:14px;">*</span></div>
         <div class="field-error-msg" id="errTech" style="margin-bottom:8px;">At least one Technology must be selected</div>
         <div class="form-row-3">
-          <div class="form-group">
-            <label>Frontend Tech</label>
-            <div class="dev-check-group" id="feTechGroup">
-              <?php foreach ($technologies_list as $t): ?>
-                <label class="dev-check-item">
-                  <input type="checkbox" name="fe_tech[]" value="<?= $t['id'] ?>" id="eFeTech_<?= $t['id'] ?>"/>
-                  <span><?= htmlspecialchars($t['name']) ?></span>
-                </label>
-              <?php endforeach; ?>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Backend Tech</label>
-            <div class="dev-check-group" id="beTechGroup">
-              <?php foreach ($technologies_list as $t): ?>
-                <label class="dev-check-item">
-                  <input type="checkbox" name="be_tech[]" value="<?= $t['id'] ?>" id="eBeTech_<?= $t['id'] ?>"/>
-                  <span><?= htmlspecialchars($t['name']) ?></span>
-                </label>
-              <?php endforeach; ?>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Other Tech</label>
-            <div class="dev-check-group" id="otherTechGroup">
-              <?php foreach ($technologies_list as $t): ?>
-                <label class="dev-check-item">
-                  <input type="checkbox" name="other_tech[]" value="<?= $t['id'] ?>" id="eOtherTech_<?= $t['id'] ?>"/>
-                  <span><?= htmlspecialchars($t['name']) ?></span>
-                </label>
-              <?php endforeach; ?>
-            </div>
-          </div>
+          <div class="form-group"><label>Frontend Tech</label><div class="dev-check-group" id="feTechGroup"><?php foreach ($technologies_list as $t): ?><label class="dev-check-item"><input type="checkbox" name="fe_tech[]" value="<?= $t['id'] ?>" id="eFeTech_<?= $t['id'] ?>"/><span><?= htmlspecialchars($t['name']) ?></span></label><?php endforeach; ?></div></div>
+          <div class="form-group"><label>Backend Tech</label><div class="dev-check-group" id="beTechGroup"><?php foreach ($technologies_list as $t): ?><label class="dev-check-item"><input type="checkbox" name="be_tech[]" value="<?= $t['id'] ?>" id="eBeTech_<?= $t['id'] ?>"/><span><?= htmlspecialchars($t['name']) ?></span></label><?php endforeach; ?></div></div>
+          <div class="form-group"><label>Other Tech</label><div class="dev-check-group" id="otherTechGroup"><?php foreach ($technologies_list as $t): ?><label class="dev-check-item"><input type="checkbox" name="other_tech[]" value="<?= $t['id'] ?>" id="eOtherTech_<?= $t['id'] ?>"/><span><?= htmlspecialchars($t['name']) ?></span></label><?php endforeach; ?></div></div>
         </div>
       </div>
       <div class="modal-footer">
@@ -1221,7 +987,7 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
     </form>
   </div>
 </div>
-<?php endif; /* end is_developer for modal */ ?>
+<?php endif; ?>
 
 <!-- TOAST -->
 <?php if ($msg): ?>
@@ -1237,43 +1003,33 @@ tbody td { padding:13px 14px; font-size:13.5px; vertical-align:middle; }
 <?php endif; ?>
 
 <script>
-/* ── Sidebar ── */
 function toggleSidebar(){var sb=document.getElementById('sidebar'),ov=document.getElementById('sbOverlay'),hm=document.getElementById('hamBtn'),o=sb.classList.toggle('open');ov.classList.toggle('open',o);hm.classList.toggle('open',o);document.body.style.overflow=(o&&window.innerWidth<=768)?'hidden':'';}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sbOverlay').classList.remove('open');document.getElementById('hamBtn').classList.remove('open');document.body.style.overflow='';}
 window.addEventListener('resize',function(){if(window.innerWidth>768)closeSidebar();});
 
-/* ── Toast ── */
 function showToast(msg,type){var old=document.getElementById('liveToast');if(old)old.remove();var t=document.createElement('div');t.className='toast '+type;t.id='liveToast';var icon=type==='success'?'<svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>':'<svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';t.innerHTML=icon+msg;document.body.appendChild(t);setTimeout(function(){t.classList.add('toast-hide');setTimeout(function(){t.remove();},500);},4000);}
 
-/* ── Auto Search ── */
 var _st=null;function autoSearch(inp){clearTimeout(_st);_st=setTimeout(function(){var val=inp.value.trim();window.location.href=val?'?search='+encodeURIComponent(val):'?';},800);}
 </script>
 
 <?php if ($is_developer): ?>
 <script>
-/* ── Edit Modal ── */
 function openEditModal(projectId){
   var modalTitle = document.getElementById('editModalTitle');
   var btnSave = document.getElementById('btnSave');
 
-  // Reset all checkboxes
   document.querySelectorAll('#editModal input[name="fe_devs[]"]').forEach(function(cb){ cb.checked=false; });
   document.querySelectorAll('#editModal input[name="be_devs[]"]').forEach(function(cb){ cb.checked=false; });
   document.querySelectorAll('#editModal input[name="qa_team[]"]').forEach(function(cb){ cb.checked=false; });
-  // Reset tech checkboxes
   document.querySelectorAll('#editModal input[name="fe_tech[]"]').forEach(function(cb){ cb.checked=false; });
   document.querySelectorAll('#editModal input[name="be_tech[]"]').forEach(function(cb){ cb.checked=false; });
   document.querySelectorAll('#editModal input[name="other_tech[]"]').forEach(function(cb){ cb.checked=false; });
-  // Clear validation errors
   document.querySelectorAll('.field-error').forEach(function(el){ el.classList.remove('field-error'); });
   document.querySelectorAll('.field-error-msg').forEach(function(el){ el.classList.remove('visible'); });
 
-  // ═══ ADD MODE (projectId = 0) ═══
   if(!projectId || projectId === 0){
     modalTitle.textContent = 'Add Project';
     btnSave.innerHTML = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save Project';
-
-    // Clear all fields
     document.getElementById('eId').value = '0';
     document.getElementById('eName').value = '';
     document.getElementById('eName').placeholder = 'Enter project name';
@@ -1285,17 +1041,14 @@ function openEditModal(projectId){
     document.getElementById('eDeliveryDate').value = '';
     document.getElementById('eLead').value = '';
     document.getElementById('eQaLead').value = '';
-
     document.getElementById('editModal').classList.add('open');
     document.body.style.overflow = 'hidden';
-    // Scroll modal body to top & page to top
     var modalBody = document.querySelector('#editModal .modal-body');
     if(modalBody) modalBody.scrollTop = 0;
     window.scrollTo({top:0,behavior:'smooth'});
     return;
   }
 
-  // ═══ EDIT MODE (existing project) ═══
   modalTitle.textContent = 'Edit Project';
   btnSave.innerHTML = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Update Project';
 
@@ -1303,7 +1056,6 @@ function openEditModal(projectId){
     .then(function(r){return r.json();})
     .then(function(data){
       if(!data.success){showToast('Failed to load project data: '+(data.error||'Error'),'error');return;}
-
       document.getElementById('eId').value = data.id || '';
       document.getElementById('eName').value = data.name || '';
       document.getElementById('eClientSelect').value = data.client_id || '';
@@ -1314,31 +1066,14 @@ function openEditModal(projectId){
       document.getElementById('eDeliveryDate').value = data.delivery_date || '';
       document.getElementById('eLead').value = data.project_lead_id || '';
       document.getElementById('eQaLead').value = data.qa_lead_id || '';
-
-      if(data.fe_devs && data.fe_devs.length>0){
-        data.fe_devs.forEach(function(uid){var cb=document.getElementById('eFeDev_'+uid);if(cb)cb.checked=true;});
-      }
-      if(data.be_devs && data.be_devs.length>0){
-        data.be_devs.forEach(function(uid){var cb=document.getElementById('eBeDev_'+uid);if(cb)cb.checked=true;});
-      }
-      if(data.qa_team && data.qa_team.length>0){
-        data.qa_team.forEach(function(uid){var cb=document.getElementById('eQaDev_'+uid);if(cb)cb.checked=true;});
-      }
-
-      // Check tech checkboxes
-      if(data.fe_tech && data.fe_tech.length>0){
-        data.fe_tech.forEach(function(tid){var cb=document.getElementById('eFeTech_'+tid);if(cb)cb.checked=true;});
-      }
-      if(data.be_tech && data.be_tech.length>0){
-        data.be_tech.forEach(function(tid){var cb=document.getElementById('eBeTech_'+tid);if(cb)cb.checked=true;});
-      }
-      if(data.other_tech && data.other_tech.length>0){
-        data.other_tech.forEach(function(tid){var cb=document.getElementById('eOtherTech_'+tid);if(cb)cb.checked=true;});
-      }
-
+      if(data.fe_devs) data.fe_devs.forEach(function(uid){var cb=document.getElementById('eFeDev_'+uid);if(cb)cb.checked=true;});
+      if(data.be_devs) data.be_devs.forEach(function(uid){var cb=document.getElementById('eBeDev_'+uid);if(cb)cb.checked=true;});
+      if(data.qa_team) data.qa_team.forEach(function(uid){var cb=document.getElementById('eQaDev_'+uid);if(cb)cb.checked=true;});
+      if(data.fe_tech) data.fe_tech.forEach(function(tid){var cb=document.getElementById('eFeTech_'+tid);if(cb)cb.checked=true;});
+      if(data.be_tech) data.be_tech.forEach(function(tid){var cb=document.getElementById('eBeTech_'+tid);if(cb)cb.checked=true;});
+      if(data.other_tech) data.other_tech.forEach(function(tid){var cb=document.getElementById('eOtherTech_'+tid);if(cb)cb.checked=true;});
       document.getElementById('editModal').classList.add('open');
       document.body.style.overflow='hidden';
-      // Scroll modal body to top & page to top
       var modalBody = document.querySelector('#editModal .modal-body');
       if(modalBody) modalBody.scrollTop = 0;
       window.scrollTo({top:0,behavior:'smooth'});
@@ -1350,82 +1085,24 @@ function closeModal(id){document.getElementById(id).classList.remove('open');doc
 document.getElementById('editModal').addEventListener('click',function(e){if(e.target===this)closeModal('editModal');});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal('editModal');});
 
-/* ── AJAX Form Submit ── */
 document.getElementById('editForm').addEventListener('submit',function(e){
   e.preventDefault();
-
-  // ── VALIDATION ──
   var errors = [];
-  function clearErrors(){
-    document.querySelectorAll('.field-error').forEach(function(el){ el.classList.remove('field-error'); });
-    document.querySelectorAll('.field-error-msg').forEach(function(el){ el.classList.remove('visible'); });
-  }
-  function markError(el, msgId){
-    if(el) el.classList.add('field-error');
-    var msg = document.getElementById(msgId);
-    if(msg) msg.classList.add('visible');
-  }
+  function clearErrors(){document.querySelectorAll('.field-error').forEach(function(el){el.classList.remove('field-error');});document.querySelectorAll('.field-error-msg').forEach(function(el){el.classList.remove('visible');});}
+  function markError(el,msgId){if(el)el.classList.add('field-error');var msg=document.getElementById(msgId);if(msg)msg.classList.add('visible');}
   clearErrors();
 
-  // 1. Project Name
-  var nameVal = document.getElementById('eName').value.trim();
-  if(!nameVal){
-    errors.push('Project Name is required');
-    markError(document.getElementById('eName'), 'errName');
-  }
+  if(!document.getElementById('eName').value.trim()){errors.push('Project Name is required');markError(document.getElementById('eName'),'errName');}
+  if(!document.getElementById('eClientSelect').value){errors.push('Client is required');markError(document.getElementById('eClientSelect'),'errClient');}
+  if(!document.getElementById('eStatusSelect').value){errors.push('Status is required');markError(document.getElementById('eStatusSelect'),'errStatus');}
+  if(!document.getElementById('eStartDate').value){errors.push('Start Date is required');markError(document.getElementById('eStartDate'),'errStartDate');}
+  if(!document.getElementById('eLead').value){errors.push('Project Lead is required');markError(document.getElementById('eLead'),'errLead');}
+  if(!document.getElementById('eQaLead').value){errors.push('QA Lead is required');markError(document.getElementById('eQaLead'),'errQaLead');}
 
-  // 2. Client
-  var clientVal = document.getElementById('eClientSelect').value;
-  if(!clientVal){
-    errors.push('Client is required');
-    markError(document.getElementById('eClientSelect'), 'errClient');
-  }
+  var techChecked=document.querySelectorAll('#editModal input[name="fe_tech[]"]:checked, #editModal input[name="be_tech[]"]:checked, #editModal input[name="other_tech[]"]:checked');
+  if(techChecked.length===0){errors.push('At least one Technology must be selected');var errTechMsg=document.getElementById('errTech');if(errTechMsg)errTechMsg.classList.add('visible');document.querySelectorAll('#feTechGroup, #beTechGroup, #otherTechGroup').forEach(function(g){g.classList.add('field-error');});}
 
-  // 3. Status — always has a default value, but still check
-  var statusVal = document.getElementById('eStatusSelect').value;
-  if(!statusVal){
-    errors.push('Status is required');
-    markError(document.getElementById('eStatusSelect'), 'errStatus');
-  }
-
-  // 4. Start Date
-  var startDateVal = document.getElementById('eStartDate').value;
-  if(!startDateVal){
-    errors.push('Start Date is required');
-    markError(document.getElementById('eStartDate'), 'errStartDate');
-  }
-
-  // 5. Project Lead
-  var leadVal = document.getElementById('eLead').value;
-  if(!leadVal){
-    errors.push('Project Lead is required');
-    markError(document.getElementById('eLead'), 'errLead');
-  }
-
-  // 6. QA Lead
-  var qaLeadVal = document.getElementById('eQaLead').value;
-  if(!qaLeadVal){
-    errors.push('QA Lead is required');
-    markError(document.getElementById('eQaLead'), 'errQaLead');
-  }
-
-  // 7. Technologies (at least one tech checkbox must be checked)
-  var techChecked = document.querySelectorAll('#editModal input[name="fe_tech[]"]:checked, #editModal input[name="be_tech[]"]:checked, #editModal input[name="other_tech[]"]:checked');
-  if(techChecked.length === 0){
-    errors.push('At least one Technology must be selected');
-    var errTechMsg = document.getElementById('errTech');
-    if(errTechMsg) errTechMsg.classList.add('visible');
-    document.querySelectorAll('#feTechGroup, #beTechGroup, #otherTechGroup').forEach(function(g){ g.classList.add('field-error'); });
-  }
-
-  // If errors, show toast and stop
-  if(errors.length > 0){
-    showToast(errors[0], 'error');
-    // Scroll to first error field
-    var firstErr = document.querySelector('.field-error');
-    if(firstErr) firstErr.scrollIntoView({behavior:'smooth', block:'center'});
-    return;
-  }
+  if(errors.length>0){showToast(errors[0],'error');var firstErr=document.querySelector('.field-error');if(firstErr)firstErr.scrollIntoView({behavior:'smooth',block:'center'});return;}
 
   var btnSave=document.getElementById('btnSave');
   if(btnSave.disabled)return;
@@ -1441,6 +1118,6 @@ document.getElementById('editForm').addEventListener('submit',function(e){
     .catch(function(err){console.error('Submit error:',err);showToast('Error saving project!','error');btnSave.disabled=false;btnSave.innerHTML='<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save Project';});
 });
 </script>
-<?php endif; /* end is_developer for JS */ ?>
+<?php endif; ?>
 </body>
 </html>

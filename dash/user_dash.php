@@ -255,6 +255,7 @@ if ($total_my_projects > 0) {
         FROM test_cases tc
         JOIN projects p ON tc.project_id = p.id
         WHERE tc.project_id $myProjInIds
+          AND p.`$proj_action` = 'active'
           AND $tcUserWhere
         ORDER BY " . ($tc_exec_on ? "tc.`$tc_exec_on`" : ($tc_created_at ? "tc.`$tc_created_at`" : "tc.id")) . " DESC
         LIMIT 10
@@ -393,8 +394,8 @@ function fmt_datetime_ist($datetime): string {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>TestiFy - Dashboard</title>
-<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
+<link rel="icon" type="image/jpg" href="../icon/testify.jpg" />
 <link rel="stylesheet" href="../css/ad_dash.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -479,9 +480,13 @@ function fmt_datetime_ist($datetime): string {
     Home
   </a>
   <div class="sb-section">Pages</div>
+  <a href="../user_page/u_client.php" class="sb-link">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+    Clients
+  </a>
   <a href="../user_page/u_project.php" class="sb-link">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-    My Projects
+    Projects
   </a>
   <a href="../user_page/u_requirement.php" class="sb-link">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
@@ -662,7 +667,7 @@ function fmt_datetime_ist($datetime): string {
                 <h4><?= htmlspecialchars($act['title']) ?></h4>
                 <p><?= htmlspecialchars($act['desc']) ?></p>
                 <?php if ($act['date']): ?>
-                  <div class="activity-time"><?= time_ago($act['date']) ?> &middot; <?= fmt_datetime_ist($act['date']) ?></div>
+                  <div class="activity-time"><?= time_ago($act['date']) ?> &middot; <?= fmt_datetime_ist($act['date']) ?> IST</div>
                 <?php endif; ?>
               </div>
             </div>

@@ -1,7 +1,7 @@
 <?php
 // ── user_page/u_requirement.php ─────────────────────────────
 // USER VERSION: Requirements from user's assigned projects only
-// Developer = Add/Edit/Delete, QA = View Only
+// Both Developer & QA = Add/Edit/Delete access
 session_start();
 include '../config/db.php';
 
@@ -39,6 +39,7 @@ if (!$current_user_id && !empty($current_user_name)) {
 // ════════════════════════════════════════════════════════
  $is_developer = in_array(strtolower($current_user_role), ['developer', 'lead']);
  $is_qa        = in_array(strtolower($current_user_role), ['tester', 'qa']);
+ $has_access   = $is_developer || $is_qa;
 
 if (isset($_GET['added']))     { $msg = 'Requirement added successfully!';   $msg_type = 'success'; }
 elseif (isset($_GET['updated']))   { $msg = 'Requirement updated!';              $msg_type = 'success'; }
@@ -46,7 +47,7 @@ elseif (isset($_GET['deleted']))   { $msg = 'Requirement deleted.';             
 elseif (isset($_GET['add_err']))   { $msg = 'Project, Title, Description and Priority are required.'; $msg_type = 'error'; }
 elseif (isset($_GET['edit_err']))  { $msg = 'Project, Title and Priority are required.';              $msg_type = 'error'; }
 elseif (isset($_GET['import_err'])){ $msg = 'Please select a project for import.';              $msg_type = 'error'; }
-elseif (isset($_GET['no_access'])){ $msg = 'Access Denied! QA does not have add/edit permission.';  $msg_type = 'error'; }
+elseif (isset($_GET['no_access'])){ $msg = 'Access Denied!';  $msg_type = 'error'; }
 elseif (isset($_GET['imported'])) {
     $imp  = (int)$_GET['imported'];
     $errs = (int)($_GET['imp_err'] ?? 0);
@@ -73,10 +74,10 @@ if ($current_user_id) {
  $user_project_ids_str = !empty($user_project_ids) ? implode(',', $user_project_ids) : '0';
 
 // ════════════════════════════════════════════════════════
-//  IMPORT CSV (Developer Only)
+//  IMPORT CSV (Developer & QA)
 // ════════════════════════════════════════════════════════
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'import_csv') {
-    if (!$is_developer) {
+    if (!$has_access) {
         header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?no_access=1');
         exit;
     }
@@ -189,10 +190,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
 ");
 
 // ════════════════════════════════════════════════════════
-//  DELETE (Developer Only)
+//  DELETE (Developer & QA)
 // ════════════════════════════════════════════════════════
 if (isset($_GET['delete'])) {
-    if (!$is_developer) {
+    if (!$has_access) {
         if (isset($_GET['ajax'])) {
             header('Content-Type: application/json');
             echo json_encode(['success' => false, 'error' => 'Access Denied!']);
@@ -216,10 +217,10 @@ if (isset($_GET['delete'])) {
 }
 
 // ════════════════════════════════════════════════════════
-//  ADD (Developer Only)
+//  ADD (Developer & QA)
 // ════════════════════════════════════════════════════════
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add') {
-    if (!$is_developer) {
+    if (!$has_access) {
         header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?no_access=1');
         exit;
     }
@@ -264,10 +265,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
 }
 
 // ════════════════════════════════════════════════════════
-//  EDIT (Developer Only)
+//  EDIT (Developer & QA)
 // ════════════════════════════════════════════════════════
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit') {
-    if (!$is_developer) {
+    if (!$has_access) {
         header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?no_access=1');
         exit;
     }
@@ -380,7 +381,7 @@ if ($filters_applied && !empty($user_project_ids)) {
 }
 
  $edit_req = null;
-if (isset($_GET['edit']) && $is_developer) {
+if (isset($_GET['edit']) && $has_access) {
     $eid  = (int)$_GET['edit'];
     $stmt = $conn->prepare("SELECT * FROM requirements WHERE id = ?");
     $stmt->bind_param('i', $eid); $stmt->execute();
@@ -748,8 +749,12 @@ textarea.form-control { resize:vertical; min-height:80px; }
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
     My Projects
   </a>
+  <a href="../user_page/u_client.php" class="sb-link">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+    Clients
+  </a>
   <a href="../user_page/u_requirement.php" class="sb-link active">
-    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
     Requirements
   </a>
   <a href="../user_page/u_test_plans.php" class="sb-link">
@@ -773,13 +778,6 @@ textarea.form-control { resize:vertical; min-height:80px; }
     <h1>My Requirements</h1>
     <span class="badge-page">Board</span>
   </div>
-
-  <?php if ($is_qa): ?>
-  <div class="qa-notice">
-    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-    <span>You are QA — You can only view requirements. Add/Edit/Delete access is available only for Developers.</span>
-  </div>
-  <?php endif; ?>
 
   <!-- TOOLBAR -->
   <div class="toolbar">
@@ -807,7 +805,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
         </a>
       <?php endif; ?>
     </div>
-    <?php if ($is_developer): ?>
+    <?php if ($has_access): ?>
     <div class="toolbar-right">
       <button class="btn-template" onclick="downloadTemplate()">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -890,13 +888,13 @@ textarea.form-control { resize:vertical; min-height:80px; }
             <th>Exp. Delivery</th>
             <th>Act. Delivery</th>
             <th>Flags</th>
-            <?php if ($is_developer): ?><th>Actions</th><?php endif; ?>
+            <?php if ($has_access): ?><th>Actions</th><?php endif; ?>
           </tr>
         </thead>
         <tbody id="reqTbody">
           <?php if (!$filters_applied): ?>
           <tr>
-            <td colspan="<?= $is_developer ? 10 : 9 ?>">
+            <td colspan="<?= $has_access ? 10 : 9 ?>">
               <div class="empty-state">
                 <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                 <p>Apply Filters to View Requirements</p>
@@ -906,7 +904,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
           </tr>
           <?php elseif (empty($requirements)): ?>
           <tr>
-            <td colspan="<?= $is_developer ? 10 : 9 ?>">
+            <td colspan="<?= $has_access ? 10 : 9 ?>">
               <div class="empty-state">
                 <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                 <p>No Requirements Found</p>
@@ -943,17 +941,13 @@ textarea.form-control { resize:vertical; min-height:80px; }
                   <span class="flag <?= $r['bug_fixed']     ? 'yes' : 'no' ?>">Fixed</span>
                 </div>
               </td>
-              <?php if ($is_developer): ?>
+              <?php if ($has_access): ?>
               <td>
                 <div class="action-btns">
                   <button class="btn-icon edit" title="Edit"
                     onclick='openEditModal(<?= htmlspecialchars(json_encode($r), ENT_QUOTES) ?>)'>
                     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>
-                  <!-- <button class="btn-icon del" title="Delete"
-                    onclick="openConfirm(<?= $r['id'] ?>, '<?= addslashes(htmlspecialchars($r['title'])) ?>')">
-                    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                  </button> -->
                 </div>
               </td>
               <?php endif; ?>
@@ -1002,7 +996,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
 </div>
 </div>
 
-<?php if ($is_developer): ?>
+<?php if ($has_access): ?>
 <!-- ═══════════════ ADD MODAL ═══════════════ -->
 <div class="modal-overlay" id="addModal">
   <div class="modal">
@@ -1233,7 +1227,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
     </div>
   </div>
 </div>
-<?php endif; /* end is_developer for modals */ ?>
+<?php endif; /* end has_access for modals */ ?>
 
 <!-- TOAST -->
 <?php if ($msg): ?>
@@ -1253,7 +1247,7 @@ textarea.form-control { resize:vertical; min-height:80px; }
 </script>
 <?php endif; ?>
 
-<?php if ($edit_req && $is_developer): ?>
+<?php if ($edit_req && $has_access): ?>
 <script>
 document.addEventListener('DOMContentLoaded', function(){
   document.body.style.overflow = '';
@@ -1300,7 +1294,7 @@ function closeSidebar(){
 }
 window.addEventListener('resize', function(){ if(window.innerWidth > 768) closeSidebar(); });
 
-<?php if ($is_developer): ?>
+<?php if ($has_access): ?>
 // ── Form Validation ──
 function validateAddForm(){
   var proj  = document.querySelector('#addModal [name="project_id"]').value;
@@ -1474,7 +1468,7 @@ document.addEventListener('DOMContentLoaded', function(){
     }
   });
 });
-<?php endif; /* end is_developer for JS */ ?>
+<?php endif; /* end has_access for JS */ ?>
 
 // ── Toast (shared) ──
 function showToast(msg, type){

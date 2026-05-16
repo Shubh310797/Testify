@@ -1319,6 +1319,10 @@ tbody td { padding:12px 14px; font-size:13.5px; vertical-align:middle; }
     Home
   </a>
   <div class="sb-section">Pages</div>
+  <a href="../user_page/u_client.php" class="sb-link">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+    Clients
+  </a>
   <a href="../user_page/u_project.php" class="sb-link">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
      Projects
