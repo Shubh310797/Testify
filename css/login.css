@@ -278,3 +278,30 @@
       .card { min-height: unset; }
       .panel-right { padding: 40px 24px; }
     }
+    /* ===== Eye Toggle Styles ===== */
+    .input-group {
+      position: relative;
+    }
+
+    .eye-toggle {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+      padding: 2px;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+
+    .eye-toggle:hover {
+      background: rgba(107, 127, 163, 0.1);
+    }
+
+    .input-group input[name="password"] {
+      padding-right: 44px;
+    }

@@ -2,14 +2,13 @@
 session_start();
 include 'config/db.php';
 
-$error = "";
-$success = "";
+ $error = "";
+ $success = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     $username = $_POST['username'];
-    $password = md5($_POST['password']); // ✅ MD5 convert
-    // ✅ username + password dono ek saath check karo
+    $password = md5($_POST['password']);
     $sql = "SELECT * FROM users WHERE username = ? AND password = ?";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("ss", $username, $password);
@@ -19,7 +18,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
 
-        // ✅ INACTIVE CHECK — yahi fix hai
         if (isset($user['status']) && $user['status'] === 'inactive') {
             $error = "Aapka account inactive kar diya gaya hai. Admin se sampark karein.";
         } else {
@@ -27,7 +25,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $_SESSION['name'] = $user['name'];
             $_SESSION['role'] = $user['role'];
 
-            // 🔀 Role-based redirect
             if ($user['role'] == 'admin') {
                 header("Location: dash/admin_dash.php");
             } elseif ($user['role'] == 'developer') {
@@ -49,6 +46,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>TestiFy-Login</title>
+  <link rel="icon" type="image/jpg" href="icon/testify.jpg" />
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700;800&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="css/login.css"/>
 </head>
@@ -160,10 +158,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
           <input
             type="password"
             name="password"
+            id="password"
             placeholder="Password"
             autocomplete="current-password"
             required
           />
+          <!-- 👁 Eye Toggle -->
+          <span class="eye-toggle" onclick="togglePassword()">
+            <!-- Eye Open -->
+            <svg class="eye-open" width="22" height="22" viewBox="0 0 22 22" fill="none">
+              <path d="M1 11s4-7 10-7 10 7 10 7-4 7-10 7S1 11 1 11z" stroke="#6b7fa3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="11" cy="11" r="3" stroke="#6b7fa3" stroke-width="1.5"/>
+            </svg>
+            <!-- Eye Closed -->
+            <svg class="eye-closed" width="22" height="22" viewBox="0 0 22 22" fill="none" style="display:none">
+              <path d="M1 11s4-7 10-7 10 7 10 7-4 7-10 7S1 11 1 11z" stroke="#6b7fa3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="11" cy="11" r="3" stroke="#6b7fa3" stroke-width="1.5"/>
+              <line x1="3" y1="3" x2="19" y2="19" stroke="#6b7fa3" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
         </div>
 
         <div class="row-remember">
@@ -184,6 +197,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     </div>
 
   </div>
+
+  <!-- Eye Toggle Script -->
+  <script>
+    function togglePassword() {
+      const pwdInput  = document.getElementById('password');
+      const eyeOpen   = document.querySelector('.eye-open');
+      const eyeClosed = document.querySelector('.eye-closed');
+
+      if (pwdInput.type === 'password') {
+        pwdInput.type   = 'text';
+        eyeOpen.style.display   = 'none';
+        eyeClosed.style.display = 'block';
+      } else {
+        pwdInput.type   = 'password';
+        eyeOpen.style.display   = 'block';
+        eyeClosed.style.display = 'none';
+      }
+    }
+  </script>
 
 </body>
 </html>
