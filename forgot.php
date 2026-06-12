@@ -15,7 +15,7 @@ function sendRealOTP($phone, $otp) {
     $url = "https://www.fast2sms.com/dev/bulkV2";
 
     // Message Text
-    $message = "Your FixEntra OTP is: " . $otp . ". Do not share it with anyone.";
+    $message = "Your TestiFy OTP is: " . $otp . ". Do not share it with anyone.";
     
     // Parameters
     $postData = [
@@ -175,7 +175,8 @@ if (isset($_POST['action']) && $_POST['action'] == 'verify_otp' && !empty($succe
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>FixEntra - Forgot Password</title>
+  <title>TestiFy - Forgot Password</title>
+  <link rel="icon" type="image/jpg" href="icon/testify.jpg" />
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700;800&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="css/login.css"/> 
 </head>
@@ -205,7 +206,7 @@ if (isset($_POST['action']) && $_POST['action'] == 'verify_otp' && !empty($succe
         </div>
         <div class="cloud"></div>
       </div>
-      <h1>FixEntra</h1>
+      <h1>TestiFy</h1>
       <p>Account Recovery</p>
       <div class="dots">
         <div class="dot active"></div>

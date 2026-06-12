@@ -232,23 +232,41 @@ if ($proj_deadline) {
 
 // ─────────────────────────────────────────────────────────────
 // 5. RECENT ACTIVITY — Only the LOGGED-IN user's activity
+//    AUTO-CLEAR: Only show activity from current week (since last Monday)
 // ─────────────────────────────────────────────────────────────
 $recent_activity = [];
+
+// Calculate last Monday 00:00:00 IST — activity older than this is hidden
+$monday_sql = "DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
 
 // ── 5a. Test cases CREATED or EXECUTED by this user ──
 if ($total_my_projects > 0) {
     $tc_act_sel = "tc.id, tc.project_id, tc.`$tc_status_col` AS status, p.name AS project_name";
     if ($tc_title_col)  $tc_act_sel .= ", tc.`$tc_title_col` AS tc_title";
     else                $tc_act_sel .= ", '' AS tc_title";
-    if ($tc_exec_on)    $tc_act_sel .= ", tc.`$tc_exec_on` AS activity_date";
-    elseif ($tc_created_at) $tc_act_sel .= ", tc.`$tc_created_at` AS activity_date";
-    else                $tc_act_sel .= ", NULL AS activity_date";
+    // Pick the "activity date" column and also create a separate alias for WHERE filter
+    $tc_date_col_for_where = null;
+    if ($tc_exec_on) {
+        $tc_act_sel .= ", tc.`$tc_exec_on` AS activity_date";
+        $tc_date_col_for_where = "tc.`$tc_exec_on`";
+    } elseif ($tc_created_at) {
+        $tc_act_sel .= ", tc.`$tc_created_at` AS activity_date";
+        $tc_date_col_for_where = "tc.`$tc_created_at`";
+    } else {
+        $tc_act_sel .= ", NULL AS activity_date";
+        $tc_date_col_for_where = null;
+    }
 
     // Build WHERE for user's own test cases (created_by OR executed_by = this user)
     $tcUserWhereParts = [];
     if ($tc_created_by) $tcUserWhereParts[] = "tc.`$tc_created_by` = $user_id";
     if ($tc_exec_by)    $tcUserWhereParts[] = "tc.`$tc_exec_by` = $user_id";
     $tcUserWhere = !empty($tcUserWhereParts) ? '(' . implode(' OR ', $tcUserWhereParts) . ')' : '1=0';
+
+    // AUTO-CLEAR: Only fetch activity from this week (since last Monday)
+    $tcWeekFilter = $tc_date_col_for_where
+        ? "AND DATE($tc_date_col_for_where) >= $monday_sql"
+        : '';
 
     $q_tc_act = $conn->query("
         SELECT $tc_act_sel
@@ -257,6 +275,7 @@ if ($total_my_projects > 0) {
         WHERE tc.project_id $myProjInIds
           AND p.`$proj_action` = 'active'
           AND $tcUserWhere
+          $tcWeekFilter
         ORDER BY " . ($tc_exec_on ? "tc.`$tc_exec_on`" : ($tc_created_at ? "tc.`$tc_created_at`" : "tc.id")) . " DESC
         LIMIT 10
     ");
@@ -296,10 +315,22 @@ if ($total_my_projects > 0) {
         if ($req_priority)  $req_act_sel .= ", r.`$req_priority` AS priority";
         else                $req_act_sel .= ", '' AS priority";
         $req_act_sel .= ", p.name AS project_name";
-        if ($req_created_at) $req_act_sel .= ", r.`$req_created_at` AS activity_date";
-        else                 $req_act_sel .= ", NULL AS activity_date";
+        // Pick the "activity date" column and also create a separate alias for WHERE filter
+        $req_date_col_for_where = null;
+        if ($req_created_at) {
+            $req_act_sel .= ", r.`$req_created_at` AS activity_date";
+            $req_date_col_for_where = "r.`$req_created_at`";
+        } else {
+            $req_act_sel .= ", NULL AS activity_date";
+            $req_date_col_for_where = null;
+        }
 
         $reqUserWhere = $req_created_by ? "r.`$req_created_by` = $user_id" : '1=0';
+
+        // AUTO-CLEAR: Only fetch activity from this week (since last Monday)
+        $reqWeekFilter = $req_date_col_for_where
+            ? "AND DATE($req_date_col_for_where) >= $monday_sql"
+            : '';
 
         $q_req_act = $conn->query("
             SELECT $req_act_sel
@@ -307,6 +338,7 @@ if ($total_my_projects > 0) {
             JOIN projects p ON r.`$req_proj_fk` = p.id
             WHERE r.`$req_proj_fk` $myProjInIds
               AND $reqUserWhere
+              $reqWeekFilter
             ORDER BY " . ($req_created_at ? "r.`$req_created_at`" : "r.id") . " DESC
             LIMIT 8
         ");
@@ -644,7 +676,7 @@ function fmt_datetime_ist($datetime): string {
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
           </svg>
           Recent Activity
-          <span style="font-size:12px;font-weight:400;color:#636e72;margin-left:auto;">My activity</span>
+          <span style="font-size:12px;font-weight:400;color:#636e72;margin-left:auto;">This week &middot; Auto-clears every Monday</span>
         </h2>
         <div style="padding:16px 20px;">
           <?php if (empty($recent_activity)): ?>

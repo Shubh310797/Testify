@@ -112,7 +112,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <div class="cloud"></div>
       </div>
       <h1>TestiFy</h1>
-      <p>Welcome to the website</p>
+      <p>Welcome to the TestWorld</p>
       <div class="dots">
         <div class="dot active"></div>
         <div class="dot"></div>
@@ -122,7 +122,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     <!-- Right login panel -->
     <div class="panel-right">
-      <h2>User Login</h2>
+      <h2>Portal Login</h2>
 
       <?php if ($error): ?>
         <div class="alert alert-error">⚠ <?= htmlspecialchars($error) ?></div>
